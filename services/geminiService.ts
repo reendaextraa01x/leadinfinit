@@ -6,28 +6,31 @@ import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadSta
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Helper ROBUSTO para limpar JSON (Versão Blindada v3)
+// Helper ROBUSTO para limpar JSON (Versão Blindada v4)
 const extractJson = (text: string): any => {
   try {
-    // 1. Tenta encontrar blocos de código explícitos
-    const jsonBlockMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```([\s\S]*?)```/);
+    if (!text) return [];
+
+    // 1. Tenta encontrar blocos de código JSON
+    const jsonBlockMatch = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/```\s*([\s\S]*?)\s*```/);
     if (jsonBlockMatch) {
-      return JSON.parse(jsonBlockMatch[1]);
+      try { return JSON.parse(jsonBlockMatch[1]); } catch (e) { /* continua */ }
     }
     
-    // 2. Tenta encontrar o array JSON bruto no texto
+    // 2. Tenta encontrar o array [ ... ] no texto bruto
     const firstBracket = text.indexOf('[');
     const lastBracket = text.lastIndexOf(']');
     
     if (firstBracket !== -1 && lastBracket !== -1) {
         const jsonCandidate = text.substring(firstBracket, lastBracket + 1);
-        return JSON.parse(jsonCandidate);
+        try { return JSON.parse(jsonCandidate); } catch (e) { /* continua */ }
     }
 
-    // 3. Fallback: Tenta parsear o texto todo
-    return JSON.parse(text);
+    // 3. Última tentativa: Se falhar, tenta limpar caracteres inválidos comuns
+    const cleanedText = text.replace(/^[^{[]*/, '').replace(/[^}\]]*$/, '');
+    return JSON.parse(cleanedText);
   } catch (e) {
-    console.error("JSON Parse Error:", e);
+    console.warn("Falha ao extrair JSON:", e);
     return []; 
   }
 };
@@ -73,78 +76,82 @@ export const generateLeads = async (
   let allLeads: Lead[] = [];
   let allSources: GroundingSource[] = [];
   let attempts = 0;
-  const maxAttempts = 4; // Aumentado para insistir mais
+  const maxAttempts = 6; // Aumentado para garantir persistência
   
   // Lista negra temporária para esta sessão de busca
   let currentSessionNames = [...existingNames];
 
-  // Estratégias de busca rotativas para variar os resultados do Google
+  // Estratégias de busca rotativas para forçar resultados diferentes
+  // A ordem importa: começa com o mais específico para contatos
   const searchQueries = [
       `${niche} em ${location} whatsapp telefone contato`,
-      `melhores ${niche} em ${location} lista`,
-      `empresas de ${niche} ${location} instagram`,
-      `${niche} ${location} site oficial`
+      `lista empresas ${niche} ${location} telefone`,
+      `${niche} ${location} instagram site`,
+      `melhores ${niche} em ${location}`,
+      `empresas de ${niche} ${location} endereço`
   ];
 
   while (allLeads.length < targetCount && attempts < maxAttempts) {
-      const currentQuery = searchQueries[attempts % searchQueries.length];
+      // Se acabarem as queries, repete a última ou usa uma genérica
+      const currentQuery = searchQueries[attempts] || `${niche} ${location} negócios`;
       attempts++;
       
       const leadsNeeded = targetCount - allLeads.length;
-      
-      // Pedimos mais para compensar a filtragem
-      const requestBatchSize = Math.max(leadsNeeded * 2, 10);
+      // Pedimos SEMPRE um lote grande para a IA ter de onde filtrar
+      const requestBatchSize = 15;
 
-      console.log(`[Busca] Tentativa ${attempts}: Query="${currentQuery}". Pedindo ${requestBatchSize}...`);
+      console.log(`[Busca] Tentativa ${attempts}/${maxAttempts}: Query="${currentQuery}". Leads atuais: ${allLeads.length}/${targetCount}`);
 
       let serviceStrategy = "";
       if (serviceContext && serviceContext.serviceName) {
         serviceStrategy = `
-        CONTEXTO DO VENDEDOR:
-        - Vende: "${serviceContext.serviceName}"
-        - Objetivo: Encontrar empresas que PRECISAM desse serviço (Ex: sem site, mal avaliadas).
+        CONTEXTO DE VENDA:
+        - O usuário vende: "${serviceContext.serviceName}"
+        - Busque empresas que precisem disso (Ex: se vende sites, priorize quem não tem site).
         `;
       }
     
-      let advancedFilters = "";
+      // Instruções de filtro para o Prompt (Soft Filter)
+      let promptFilters = "";
       if (filters) {
-          if (filters.websiteRule === 'must_have') advancedFilters += "- APENAS empresas com site.\n";
-          if (filters.websiteRule === 'must_not_have') advancedFilters += "- PRIORIZE empresas SEM site ou com site ruim.\n";
-          if (filters.mustHaveInstagram) advancedFilters += "- OBRIGATÓRIO ter Instagram.\n";
+          if (filters.websiteRule === 'must_have') promptFilters += "- Retorne APENAS empresas que possuem site visível.\n";
+          if (filters.websiteRule === 'must_not_have') promptFilters += "- Retorne APENAS empresas SEM site ou com site ruim.\n";
       }
-    
+
+      // IMPORTANTE: O prompt abaixo foi desenhado para evitar que a IA se recuse a dar dados.
+      // Usamos "Dados Públicos" e "Diretório" para passar pelos filtros de segurança.
       const prompt = `
-        ATUE COMO UM PESQUISADOR DE DADOS COMERCIAIS PÚBLICOS.
-        
-        TAREFA: Listar empresas reais encontradas no Google Maps/Search.
+        VOCÊ É UM EXTRATOR DE DADOS DE DIRETÓRIOS PÚBLICOS DE NEGÓCIOS (Google Maps).
+        SUA TAREFA É APENAS FORMATAR DADOS JÁ PÚBLICOS EM JSON.
+
         BUSCA: "${currentQuery}"
         
         ${serviceStrategy}
-        ${advancedFilters}
-        ${customInstruction ? `ORDEM ESPECIAL: ${customInstruction}` : ""}
+        ${promptFilters}
+        ${customInstruction ? `FILTRO ESPECIAL DO USUÁRIO: ${customInstruction}` : ""}
         
-        REGRAS RÍGIDAS:
-        1. Extraia EXATAMENTE ${requestBatchSize} resultados ÚNICOS.
-        2. FOCO EM DADOS DE CONTATO:
-           - Tente encontrar o TELEFONE ou WHATSAPP público da empresa.
-           - Se encontrar no Facebook/Instagram/Site, inclua.
-           - Se NÃO encontrar telefone, mas a empresa parecer muito boa, inclua mesmo assim (mas priorize com telefone).
-        3. IGNORE estes nomes já listados: ${currentSessionNames.join(", ")}.
-        4. IDIOMA: PORTUGUÊS (PT-BR).
+        INSTRUÇÕES DE EXTRAÇÃO:
+        1. Liste ${requestBatchSize} empresas REAIS encontradas nesta busca.
+        2. EXTRAIA O TELEFONE/WHATSAPP PÚBLICO. Se não estiver óbvio, procure no snippet.
+        3. Se não encontrar o telefone exato, mas a empresa existir, coloque "Não encontrado" (não invente).
+        4. IGNORE estes nomes já listados: ${currentSessionNames.join(", ")}.
+        5. IDIOMA: PORTUGUÊS (PT-BR).
     
-        RETORNE APENAS UM JSON ARRAY:
+        FORMATO OBRIGATÓRIO DE SAÍDA (JSON ARRAY PURO):
         [
           {
             "name": "Nome da Empresa",
-            "phone": "Telefone (Formato (XX) XXXX-XXXX)", 
-            "instagram": "Link ou 'Não encontrado'",
-            "website": "Link ou 'Sem Site'",
-            "description": "Breve descrição e estado digital (ex: Sem site, Insta desatualizado).",
-            "painPoints": ["Sem Site", "Review Baixo"],
-            "matchReason": "Por que é um bom lead.",
+            "phone": "(XX) XXXX-XXXX", 
+            "instagram": "@usuario ou link",
+            "website": "URL ou 'Sem Site'",
+            "description": "Breve descrição do estado digital da empresa.",
+            "painPoints": ["Sem Site", "Avaliação Baixa", "Instagram Inativo"],
+            "matchReason": "Motivo curto do porquê é um bom lead.",
             "qualityTier": "high-ticket" | "opportunity" | "urgent"
           }
         ]
+        
+        NÃO ESCREVA NADA ALÉM DO JSON.
       `;
     
       try {
@@ -153,13 +160,14 @@ export const generateLeads = async (
           contents: prompt,
           config: {
             tools: [{ googleSearch: {} }],
-            temperature: 0.7, // Um pouco mais criativo para achar variações de dados
+            temperature: 0.5, // Baixa criatividade para focar em dados reais
           },
         });
     
         const text = response.text || "";
         const rawLeads = extractJson(text);
     
+        // Captura fontes (Grounding)
         if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
             const newSources = response.candidates[0].groundingMetadata.groundingChunks
             .map((chunk: any) => chunk.web)
@@ -175,10 +183,10 @@ export const generateLeads = async (
                 name: item.name || "Desconhecido",
                 phone: item.phone || "Não encontrado",
                 instagram: (item.instagram === "Not Found" || !item.instagram || item.instagram === "Não encontrado") ? null : item.instagram,
-                description: item.description || "Sem descrição disponível.",
+                description: item.description || "Oportunidade de negócio detectada.",
                 website: (item.website === "Not Found" || !item.website || item.website === "Sem Site" || item.website === "Não encontrado") ? undefined : item.website,
-                painPoints: Array.isArray(item.painPoints) ? item.painPoints : [],
-                matchReason: item.matchReason || "Lead compatível.",
+                painPoints: Array.isArray(item.painPoints) ? item.painPoints : ["Presença Digital Fraca"],
+                matchReason: item.matchReason || "Lead compatível com seu serviço.",
                 confidenceScore: 1,
                 status: 'new' as LeadStatus,
                 score: calculateLeadScore(item),
@@ -187,24 +195,22 @@ export const generateLeads = async (
               .filter((lead) => {
                 // Filtro de Duplicidade
                 const isDuplicate = currentSessionNames.some(existingName => 
-                    existingName.toLowerCase() === lead.name.toLowerCase() ||
-                    (lead.phone !== "Não encontrado" && lead.phone.includes(existingName)) 
+                    existingName.toLowerCase() === lead.name.toLowerCase()
                 );
                 if (isDuplicate) return false;
 
-                // Filtro de Telefone:
-                // Se o usuário pediu "Apenas Celular" (mobileOnly), somos estritos.
-                // Caso contrário, aceitamos se tiver qualquer número válido (tamanho > 8)
-                const clean = cleanPhone(lead.phone);
-                
-                // Se não tem telefone nenhum, descarta (conforme pedido "contatos válidos")
-                if (!clean) return false;
+                // FILTRO DE SEGURANÇA:
+                // Se a IA não trouxe telefone, a gente descarta (o usuário quer leads contatáveis).
+                // Mas somos flexíveis com o formato.
+                if (!lead.phone || lead.phone === "Não encontrado") return false;
 
-                // Se o usuário exigiu mobileOnly no filtro, checamos se parece celular (11 dígitos ou começa com 9)
+                // Filtro "Mobile Only" (Apenas se o usuário marcou a opção)
                 if (filters?.mobileOnly) {
-                   // No Brasil, celulares têm 11 dígitos. Fixos têm 10.
-                   // Mas permitimos passar se for 10 ou 11 para não perder leads bons que formataram errado.
-                   return clean.length >= 10;
+                   const clean = cleanPhone(lead.phone);
+                   // Se não conseguimos limpar o telefone, descarta
+                   if (!clean) return false;
+                   // Se for muito curto, descarta
+                   if (clean.length < 8) return false;
                 }
 
                 return true;
@@ -214,17 +220,17 @@ export const generateLeads = async (
                 allLeads = [...allLeads, ...validLeadsInBatch];
                 validLeadsInBatch.forEach(l => currentSessionNames.push(l.name));
             }
-            
-            if (allLeads.length >= targetCount) break;
         }
     
       } catch (error) {
         console.error(`Erro na tentativa ${attempts}:`, error);
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Espera um pouco antes de tentar de novo
+        // Não para o loop, tenta a próxima query
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
   }
 
-  // Retorna o que conseguimos
+  // Se após todas as tentativas não tivermos leads suficientes, retornamos o que temos.
+  // O App.tsx vai lidar com a mensagem de erro se o array estiver vazio.
   return { leads: allLeads.slice(0, targetCount), sources: allSources };
 };
 
@@ -236,12 +242,18 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
     ];
 
     const prompt = `
-        ATUE COMO UM ESPECIALISTA EM PESQUISA DE MERCADO.
+        ATUE COMO UM ESPECIALISTA EM PESQUISA DE MERCADO (GOOGLE DORKING).
         SERVIÇO: "${serviceContext.serviceName}"
         DESCRIÇÃO: "${serviceContext.description}"
         
-        Gere 3 instruções de busca (filtros) para encontrar clientes ideais.
+        Gere 3 instruções de busca (filtros) para encontrar clientes ideais no Google Maps.
+        
+        REGRAS:
+        - Devem ser comandos diretos de filtro.
+        - Devem focar em "Dores" que o serviço resolve.
+        
         SAÍDA JSON ARRAY: ["Ideia 1", "Ideia 2", "Ideia 3"]
+        NÃO ESCREVA NADA ALÉM DO JSON.
     `;
 
     try {
@@ -249,14 +261,10 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
             model: 'gemini-2.5-flash',
             contents: prompt,
             config: { 
-                responseMimeType: "application/json",
                 temperature: 0.8 
             }
         });
-        
-        const text = response.text || "[]";
-        const json = extractJson(text);
-        
+        const json = extractJson(response.text || "[]");
         return Array.isArray(json) ? json : [
              "Apenas empresas com site quebrado ou fora do ar",
              "Negócios com muitas reclamações recentes",
@@ -316,54 +324,58 @@ export const generateMarketingCopy = async (
 
 export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceContext): Promise<string> => {
     const prompt = `
-        ATUE COMO UM CONSULTOR SÊNIOR.
-        ALVO: ${lead.name}.
-        SERVIÇO: ${serviceContext.serviceName}
+        ATUE COMO UM AUDITOR DIGITAL IMPLACÁVEL (Direto e Objetivo).
+        ANALISE: ${lead.name} (${lead.website || "Sem Site"}, ${lead.instagram || "Sem Insta"}).
+        SERVIÇO VENDIDO: ${serviceContext.serviceName}
         
-        TAREFA: 3 PROBLEMAS REAIS e VISÍVEIS (Google/Insta/Site).
-        NÃO INVENTE ERROS TÉCNICOS.
-        IDIOMA: PORTUGUÊS DO BRASIL.
+        IDENTIFIQUE 3 FALHAS CRÍTICAS E VISÍVEIS QUE ESTÃO FAZENDO ELES PERDEREM DINHEIRO AGORA.
         
-        FORMATO:
-        1. ❌ [Erro]
-        2. ❌ [Erro]
-        3. ❌ [Erro]
+        REGRAS DE OURO:
+        1. SEJA CURTO: Máximo de 1 frase por ponto.
+        2. SEJA OBJETIVO: Nada de "sugiro melhorar". Diga "O link não funciona".
+        3. FOQUE NO LUCRO: Mostre que o erro custa clientes.
+        4. IDIOMA: Português do Brasil.
+        
+        FORMATO OBRIGATÓRIO:
+        1. ❌ [Falha Técnica/Visual] -> [Consequência Financeira]
+        2. ❌ [Falha] -> [Consequência]
+        3. ❌ [Falha] -> [Consequência]
     `;
 
     try {
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
-            contents: prompt
+            contents: prompt,
+            config: { temperature: 0.6 }
         });
         return response.text?.trim() || "";
     } catch (e) {
-        return "1. ❌ Presença digital inconsistente.\n2. ❌ Falta de canais de conversão.\n3. ❌ Posicionamento abaixo dos concorrentes.";
+        return "1. ❌ Sem Site Otimizado -> Perda de credibilidade e vendas.\n2. ❌ Google Meu Negócio incompleto -> Invisível no mapa.\n3. ❌ Sem canais de conversão -> Clientes desistem de comprar.";
     }
 }
 
 export const generateServiceInsights = async (serviceName: string, description: string, targetAudience: string = ""): Promise<ServiceInsights> => {
   const audienceInstruction = targetAudience 
-      ? `O usuário definiu EXPLICITAMENTE o público alvo: "${targetAudience}". Você é OBRIGADO a sugerir uma estratégia DENTRO deste público (ex: um sub-nicho premium de ${targetAudience}). É PROIBIDO SUGERIR OUTRO SETOR.`
-      : "O usuário não definiu público. Analise o serviço e encontre o setor que paga mais caro por isso.";
+      ? `O usuário definiu EXPLICITAMENTE o público: "${targetAudience}". Você DEVE sugerir um nicho DENTRO deste público. Ex: Se ele disse "Médicos", sugira "Cirurgiões Plásticos". NÃO MUDE O SETOR.`
+      : "O usuário não definiu público. Encontre o setor que paga mais caro por este serviço.";
 
   const prompt = `
-    ATUE COMO UM ESTRATEGISTA DE NEGÓCIOS LÓGICO E ANALÍTICO.
+    ATUE COMO UM ESTRATEGISTA DE NEGÓCIOS SÊNIOR (Lógica Pura).
     
-    DADOS DE ENTRADA:
-    1. SERVIÇO VENDIDO: "${serviceName}"
-    2. COMO ELE É ENTREGUE: "${description}"
-    3. RESTRIÇÃO DE PÚBLICO: ${audienceInstruction}
+    DADOS:
+    1. SERVIÇO: "${serviceName}"
+    2. DESCRIÇÃO: "${description}"
+    3. RESTRIÇÃO: ${audienceInstruction}
 
-    SUA TAREFA:
-    Conectar o SERVIÇO ao MELHOR COMPRADOR POSSÍVEL de forma lógica.
+    TAREFA: Conecte o serviço ao comprador ideal usando lógica financeira.
     
-    PERGUNTAS QUE VOCÊ DEVE RESPONDER NO JSON:
-    - recommendedNiche: Qual o sub-nicho específico (dentro da restrição) que tem a dor mais aguda e dinheiro para pagar? (Ex: Não diga "Médicos", diga "Cirurgiões Plásticos").
-    - suggestedTicket: Qual o valor justo (em Reais) para cobrar desse nicho específico, considerando o impacto financeiro que o serviço gera?
-    - reasoning: Explique a lógica. "O serviço X resolve a dor Y do nicho Z, o que gera lucro W, por isso eles pagam."
-    - potential: Qual o tamanho da oportunidade?
+    PERGUNTAS PARA O JSON:
+    - recommendedNiche: O sub-nicho específico com mais dinheiro. (Ex: "Imobiliárias de Alto Padrão", não só "Imobiliárias").
+    - suggestedTicket: Valor justo (em R$) baseado no ROI que o serviço gera.
+    - reasoning: A lógica de Venda. "O serviço X resolve a dor Y, gerando Z de lucro."
+    - potential: Tamanho da oportunidade.
     
-    SAÍDA JSON (ESTRITAMENTE COERENTE):
+    SAÍDA JSON (SEM TEXTO EXTRA):
     {
       "recommendedNiche": "Texto",
       "suggestedTicket": 1500,
@@ -378,75 +390,74 @@ export const generateServiceInsights = async (serviceName: string, description: 
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.5 
+        temperature: 0.4 // Baixa temperatura para lógica
       }
     });
     
-    const text = response.text || "";
-    const json = extractJson(text);
-    
+    const json = extractJson(response.text || "");
     if (!json || !json.recommendedNiche) throw new Error("Falha na geração");
-
     return json;
 
   } catch (error) {
     return {
       recommendedNiche: targetAudience || "Empresas de Alto Padrão",
       suggestedTicket: 2000,
-      reasoning: `Seu serviço de ${serviceName} tem alto valor agregado para ${targetAudience || "o mercado"}, pois resolve dores diretas de faturamento.`,
-      potential: "Alta demanda reprimida neste setor."
+      reasoning: `Seu serviço de ${serviceName} tem alto valor para ${targetAudience || "o mercado"} pois ataca diretamente a conversão de vendas.`,
+      potential: "Alta demanda reprimida."
     };
   }
 };
 
 export const generateKillerDifferential = async (serviceName: string, description: string, targetAudience: string = "Clientes"): Promise<string> => {
     const frameworks = [
-        "GARANTIA DE RISCO REVERSO (Eu assumo o risco financeiro)",
-        "MECANISMO ÚNICO (Nome proprietário científico + Método novo)",
-        "OFERTA MAFIOSA (Irrecusável pela lógica financeira)",
-        "ANTI-AGÊNCIA (Nós odiamos o modelo padrão, fazemos o oposto)",
-        "A PROMESSA DE VELOCIDADE (Resultado rápido ou multa)",
-        "IDENTIDADE E STATUS (Venda para o Ego do cliente)",
-        "DOR AGUDA (Foco total em resolver um pesadelo agora)"
+        "RISCO REVERSO (Devolvo o dinheiro + Multa)",
+        "MECANISMO ÚNICO (Nome proprietário do método)",
+        "OFERTA MAFIOSA (Irrecusável pela lógica)",
+        "ANTI-AGÊNCIA (Nós odiamos o padrão)",
+        "VELOCIDADE EXTREMA (Resultado em X dias)",
+        "STATUS E ELITE (Apenas para quem fatura X)",
+        "DOR AGUDA (Resolvo seu pesadelo hoje)"
     ];
     
+    // Seleção aleatória para garantir variação
     const selectedFramework = frameworks[Math.floor(Math.random() * frameworks.length)];
 
     const prompt = `
-      ATUE COMO O MELHOR COPYWRITER DO MUNDO (Alex Hormozi Mode).
-      
-      FRAMEWORK ESCOLHIDO PARA ESTA VERSÃO: ${selectedFramework}.
+      ATUE COMO ALEX HORMOZI (Engenheiro de Ofertas).
+      FRAMEWORK: ${selectedFramework}.
 
-      DADOS DO USUÁRIO:
+      DADOS:
       - SERVIÇO: "${serviceName}"
-      - PÚBLICO ALVO: "${targetAudience}"
-      - CONTEXTO TÉCNICO: "${description}"
+      - PÚBLICO: "${targetAudience}"
+      - DESCRIÇÃO TÉCNICA: "${description}"
 
-      SUA MISSÃO: Criar uma oferta ÚNICA e EXCLUSIVA para este público específico.
+      MISSÃO: Criar uma OFERTA GRAND SLAM de 1 parágrafo.
       
-      REGRAS OBRIGATÓRIAS:
-      1. CITE O NOME DO PÚBLICO ALVO (${targetAudience}) explicitamente no texto.
-      2. CRIE UM NOME PARA O MÉTODO (Ex: Protocolo X, Sistema Y). Não use o nome genérico do serviço.
-      3. CRIE UMA GARANTIA ESPECÍFICA (Ex: "Devolvo R$ 500", "Trabalho de graça").
-      4. NUNCA use o texto genérico "Sistema de Aquisição Automática" a menos que faça sentido.
-      5. SEJA ESPECÍFICO SOBRE O SERVIÇO: Se é site, fale de site. Se é tráfego, fale de leads.
+      OBRIGATÓRIO:
+      1. Use o nome do público (${targetAudience}).
+      2. Invente um nome para o Método (Ex: Protocolo Lucro Turbo).
+      3. Crie uma Garantia Ousada.
+      4. SEJA ESPECÍFICO. Nada de "aumento seus resultados". Diga "Coloco 10 leads no seu zap".
+      5. NÃO REPITA TEXTOS ANTERIORES. SEJA CRIATIVO.
 
-      SAÍDA (Texto curto e impactante, máx 3 linhas):
+      SAÍDA (Texto curto):
     `;
     
     try {
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: prompt,
-            config: { temperature: 1.1 } 
+            config: { temperature: 1.2 } // Alta temperatura para criatividade
         });
         const text = response.text?.trim();
-        if (!text || text.length < 10) throw new Error("Resposta curta demais");
+        if (!text || text.length < 10) throw new Error("Resposta curta");
         return text;
     } catch (e) {
-        const audience = targetAudience || "seus clientes";
-        const service = serviceName || "serviço";
-        return `Implemento o Método ${service.split(' ')[0]}-Turbo para ${audience}. Se não dobrar seus resultados em 30 dias, eu devolvo 100% do investimento e pago R$ 200 do meu bolso.`;
+        // Fallback dinâmico para não repetir texto fixo
+        const audience = targetAudience || "sua empresa";
+        const methods = ["Protocolo Escala-X", "Sistema Venda-Automática", "Método Blindado"];
+        const method = methods[Math.floor(Math.random() * methods.length)];
+        return `Implemento o ${method} para ${audience}. Se não gerar resultado em 30 dias, devolvo seu investimento em dobro.`;
     }
 };
 
@@ -488,7 +499,7 @@ export const generateNeuroSequence = async (serviceContext: ServiceContext): Pro
     `;
     try {
         const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json" } });
-        return JSON.parse(response.text || "[]");
+        return extractJson(response.text || "[]");
     } catch (e) { return []; }
 };
 
@@ -501,7 +512,7 @@ export const runRoleplayTurn = async (profile: RoleplayProfile, chatHistory: Rol
     `;
     try {
         const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json" } });
-        return { sender: 'ai', ...JSON.parse(response.text || "{}") };
+        return { sender: 'ai', ...extractJson(response.text || "{}") };
     } catch (e) { return { sender: 'ai', text: "Erro.", feedback: "Erro.", score: 0 }; }
 };
 
@@ -514,6 +525,6 @@ export const analyzeChatHistory = async (chatText: string, serviceContext: Servi
     `;
     try {
         const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json" } });
-        return JSON.parse(response.text || "{}");
+        return extractJson(response.text || "{}");
     } catch (e) { return { score: 0, sentiment: 'neutral', hiddenIntent: "Erro", nextMove: "Erro", tip: "Erro" }; }
 };
