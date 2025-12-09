@@ -2,10 +2,18 @@
 // @ts-nocheck
 declare var process: any;
 
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights, ObjectionType, SequenceDay, RoleplayProfile, RoleplayMessage, ChatAnalysis, SearchFilters } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+// Configuração de Segurança para liberar o "Modo Hunter"
+const safetySettings = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+];
 
 // Helper ROBUSTO para limpar JSON (Versão Blindada v4)
 const extractJson = (text: string): any => {
@@ -122,6 +130,7 @@ export const generateLeads = async (
       if (filters) {
           if (filters.websiteRule === 'must_have') promptFilters += "- Retorne APENAS empresas que possuem site visível.\n";
           if (filters.websiteRule === 'must_not_have') promptFilters += "- Retorne APENAS empresas SEM site ou com site ruim.\n";
+          if (filters.mustHaveInstagram) promptFilters += "- Retorne APENAS empresas com Instagram ativo detectável.\n";
       }
 
       // IMPORTANTE: O prompt abaixo foi desenhado para evitar que a IA se recuse a dar dados.
@@ -134,7 +143,7 @@ export const generateLeads = async (
         
         ${serviceStrategy}
         ${promptFilters}
-        ${customInstruction ? `FILTRO ESPECIAL DO USUÁRIO: ${customInstruction}` : ""}
+        ${customInstruction ? `FILTRO ESPECIAL DO USUÁRIO (MIRA LASER): ${customInstruction}` : ""}
         
         INSTRUÇÕES DE EXTRAÇÃO:
         1. Liste ${requestBatchSize} empresas REAIS encontradas nesta busca.
@@ -167,6 +176,7 @@ export const generateLeads = async (
           config: {
             tools: [{ googleSearch: {} }],
             temperature: 0.5, // Baixa criatividade para focar em dados reais
+            safetySettings: safetySettings,
           },
         });
     
@@ -274,7 +284,8 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
             model: 'gemini-2.5-flash',
             contents: prompt,
             config: { 
-                temperature: 0.8 
+                temperature: 0.8,
+                safetySettings: safetySettings 
             }
         });
         const json = extractJson(response.text || "[]");
@@ -327,7 +338,7 @@ export const generateMarketingCopy = async (
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: prompt,
-      config: { temperature: 1.5 }
+      config: { temperature: 1.5, safetySettings: safetySettings }
     });
     return response.text?.trim() || "";
   } catch (error) {
@@ -359,7 +370,7 @@ export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceConte
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: prompt,
-            config: { temperature: 0.6 }
+            config: { temperature: 0.6, safetySettings: safetySettings }
         });
         return response.text?.trim() || "";
     } catch (e) {
@@ -403,7 +414,8 @@ export const generateServiceInsights = async (serviceName: string, description: 
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.4 // Baixa temperatura para lógica
+        temperature: 0.4, // Baixa temperatura para lógica
+        safetySettings: safetySettings
       }
     });
     
@@ -460,7 +472,7 @@ export const generateKillerDifferential = async (serviceName: string, descriptio
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: prompt,
-            config: { temperature: 1.2 } // Alta temperatura para criatividade
+            config: { temperature: 1.2, safetySettings: safetySettings } // Alta temperatura para criatividade
         });
         const text = response.text?.trim();
         if (!text || text.length < 10) throw new Error("Resposta curta");
@@ -484,7 +496,7 @@ export const handleObjection = async (leadName: string, objectionType: Objection
         IDIOMA: PT-BR.
     `;
     try {
-        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { safetySettings: safetySettings } });
         return response.text?.trim() || "";
     } catch (e) { return "Entendo. O que te impede agora?"; }
 };
@@ -498,7 +510,7 @@ export const calculateInactionCost = async (lead: Lead, serviceContext: ServiceC
         IDIOMA: PT-BR.
     `;
     try {
-        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
+        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { safetySettings: safetySettings } });
         return response.text?.trim() || "";
     } catch (e) { return "Você está perdendo clientes diariamente."; }
 };
@@ -511,7 +523,7 @@ export const generateNeuroSequence = async (serviceContext: ServiceContext): Pro
       IDIOMA: PT-BR.
     `;
     try {
-        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json" } });
+        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json", safetySettings: safetySettings } });
         return extractJson(response.text || "[]");
     } catch (e) { return []; }
 };
@@ -524,7 +536,7 @@ export const runRoleplayTurn = async (profile: RoleplayProfile, chatHistory: Rol
       SAÍDA JSON: { "text": "Resposta Cliente", "feedback": "Dica Coach", "score": 0-10, "betterResponse": "Melhor Resposta" }
     `;
     try {
-        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json" } });
+        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json", safetySettings: safetySettings } });
         return { sender: 'ai', ...extractJson(response.text || "{}") };
     } catch (e) { return { sender: 'ai', text: "Erro.", feedback: "Erro.", score: 0 }; }
 };
@@ -537,7 +549,7 @@ export const analyzeChatHistory = async (chatText: string, serviceContext: Servi
         SAÍDA JSON: { "score": 0-100, "sentiment": "neutral", "hiddenIntent": "Texto", "nextMove": "Texto", "tip": "Texto" }
     `;
     try {
-        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json" } });
+        const response: GenerateContentResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { responseMimeType: "application/json", safetySettings: safetySettings } });
         return extractJson(response.text || "{}");
     } catch (e) { return { score: 0, sentiment: 'neutral', hiddenIntent: "Erro", nextMove: "Erro", tip: "Erro" }; }
 };
