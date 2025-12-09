@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { Lead, ServiceContext, LeadStatus, ObjectionType, ChatAnalysis } from '../types';
 import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon, MicroscopeIcon, XIcon, LightBulbIcon, SearchIcon } from './ui/Icons';
-import { generateMarketingCopy, generateLeadAudit, handleObjection, calculateInactionCost, analyzeChatHistory } from '../services/geminiService';
+import { generateMarketingCopy, generateLeadAudit, handleObjection, calculateInactionCost, analyzeChatHistory, generateMarketingCopyBatch } from '../services/geminiService';
 
 interface BatchSenderProps {
   savedLeads: Lead[];
@@ -19,6 +19,15 @@ const cleanPhone = (phone: string): string | null => {
     return `55${cleaned}`;
   }
   return cleaned;
+};
+
+// Helper para dividir array em chunks (Movido para fora e reescrito para evitar erro de tipo do TS)
+const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+      chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
 };
 
 interface LeadWithStatus {
@@ -109,15 +118,52 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
     // Only generate for 'new' leads to save tokens/time
     const leadsToProcess = savedLeads.filter(l => l.status === 'new' && cleanPhone(l.phone));
 
-    for (const lead of leadsToProcess) {
-      setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingMessage: true }}));
-      try {
-        const copy = await generateMarketingCopy(lead, serviceContext);
-        setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], message: copy, isGeneratingMessage: false }}));
-      } catch (e) {
-         setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingMessage: false }}));
-      }
+    // Dividir em lotes de 5 para o Batch API
+    const batches = chunkArray(leadsToProcess, 5);
+
+    // Set loading states
+    setLeadStates(prev => {
+        const next = { ...prev };
+        leadsToProcess.forEach(l => {
+             if (next[l.id]) next[l.id] = { ...next[l.id], isGeneratingMessage: true };
+        });
+        return next;
+    });
+
+    for (const batch of batches) {
+        try {
+            // Chama a API em lote
+            const results = await generateMarketingCopyBatch(batch, serviceContext);
+            
+            // Atualiza o estado com as mensagens recebidas
+            setLeadStates(prev => {
+                const next = { ...prev };
+                Object.keys(results).forEach(leadId => {
+                    if (next[leadId]) {
+                        next[leadId] = { ...next[leadId], message: results[leadId], isGeneratingMessage: false };
+                    }
+                });
+                // Garante que quem não veio no result pare de carregar (fallback)
+                batch.forEach(l => {
+                    if (!results[l.id] && next[l.id]) {
+                         next[l.id] = { ...next[l.id], isGeneratingMessage: false };
+                    }
+                });
+                return next;
+            });
+        } catch (e) {
+            console.error("Erro no lote", e);
+             // Limpa loading em caso de erro
+             setLeadStates(prev => {
+                const next = { ...prev };
+                batch.forEach(l => {
+                     if (next[l.id]) next[l.id] = { ...next[l.id], isGeneratingMessage: false };
+                });
+                return next;
+            });
+        }
     }
+    
     setIsBulkGenerating(false);
   };
 
@@ -126,16 +172,30 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
       // Filtra leads novos que AINDA NÃO têm auditoria
       const leadsToProcess = savedLeads.filter(l => l.status === 'new' && !l.audit);
 
-      for (const lead of leadsToProcess) {
-          setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingAudit: true }}));
-          try {
-              const audit = await generateLeadAudit(lead, serviceContext);
-              onUpdateLead({ ...lead, audit: audit });
-          } catch (e) {
-              console.error(e);
-          } finally {
-              setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingAudit: false }}));
-          }
+      // Audits ainda fazemos sequencial/paralelo limitado, pois requer análise profunda individual
+      // Mas podemos acelerar fazendo Promise.all em pequenos grupos
+      const batches = chunkArray(leadsToProcess, 3);
+
+      for (const batch of batches) {
+          // Set loading
+           setLeadStates(prev => {
+                const next = { ...prev };
+                batch.forEach(l => {
+                     if (next[l.id]) next[l.id] = { ...next[l.id], isGeneratingAudit: true };
+                });
+                return next;
+            });
+
+           await Promise.all(batch.map(async (lead) => {
+               try {
+                   const audit = await generateLeadAudit(lead, serviceContext);
+                   onUpdateLead({ ...lead, audit: audit });
+               } catch (e) {
+                   console.error(e);
+               } finally {
+                   setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingAudit: false }}));
+               }
+           }));
       }
       setIsBulkAuditing(false);
   };

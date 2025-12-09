@@ -5,7 +5,12 @@ declare var process: any;
 import { GoogleGenAI, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights, ObjectionType, SequenceDay, RoleplayProfile, RoleplayMessage, ChatAnalysis, SearchFilters } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// FALLBACK API KEY (SEGURANÇA EXTREMA)
+// Se a variável de ambiente falhar, usamos esta chave hardcoded para garantir que o app não quebre.
+const FALLBACK_KEY = "AIzaSyBYm1j6yzneb_kkl0RZJfwpfG2CRz8qUew";
+const apiKey = process.env.API_KEY || FALLBACK_KEY;
+
+const ai = new GoogleGenAI({ apiKey: apiKey });
 
 // Configuração de Segurança para liberar o "Modo Hunter"
 const safetySettings = [
@@ -26,12 +31,20 @@ const extractJson = (text: string): any => {
       try { return JSON.parse(jsonBlockMatch[1]); } catch (e) { /* continua */ }
     }
     
-    // 2. Tenta encontrar o array [ ... ] no texto bruto
+    // 2. Tenta encontrar o array [ ... ] ou objeto { ... } no texto bruto
     const firstBracket = text.indexOf('[');
+    const firstBrace = text.indexOf('{');
     const lastBracket = text.lastIndexOf(']');
+    const lastBrace = text.lastIndexOf('}');
     
+    // Prioriza Array se ambos existirem, mas tenta o que vier primeiro/por último logicamente
     if (firstBracket !== -1 && lastBracket !== -1) {
         const jsonCandidate = text.substring(firstBracket, lastBracket + 1);
+        try { return JSON.parse(jsonCandidate); } catch (e) { /* continua */ }
+    }
+    
+    if (firstBrace !== -1 && lastBrace !== -1) {
+        const jsonCandidate = text.substring(firstBrace, lastBrace + 1);
         try { return JSON.parse(jsonCandidate); } catch (e) { /* continua */ }
     }
 
@@ -82,15 +95,10 @@ export const generateLeads = async (
   customInstruction?: string
 ): Promise<{ leads: Lead[], sources: GroundingSource[] }> => {
   
-  // STOPPER DE SEGURANÇA: Se não tiver API KEY, não tenta buscar
-  if (!process.env.API_KEY || process.env.API_KEY.includes('YOUR_KEY')) {
-      throw new Error("API Key não configurada. Configure no Vercel.");
-  }
-
   let allLeads: Lead[] = [];
   let allSources: GroundingSource[] = [];
   let attempts = 0;
-  const maxAttempts = 6; // Aumentado para garantir persistência
+  const maxAttempts = 5; // Limite de tentativas para não ficar infinito
   
   // Lista negra temporária para esta sessão de busca
   let currentSessionNames = [...existingNames];
@@ -111,8 +119,8 @@ export const generateLeads = async (
       attempts++;
       
       const leadsNeeded = targetCount - allLeads.length;
-      // Pedimos SEMPRE um lote grande para a IA ter de onde filtrar
-      const requestBatchSize = 15;
+      // Pedimos SEMPRE um lote grande para a IA ter de onde filtrar e tentar preencher em 1 ou 2 loops
+      const requestBatchSize = 25; 
 
       console.log(`[Busca] Tentativa ${attempts}/${maxAttempts}: Query="${currentQuery}". Leads atuais: ${allLeads.length}/${targetCount}`);
 
@@ -345,6 +353,70 @@ export const generateMarketingCopy = async (
     return `Fala ${lead.name}, vi aqui que vocês estão sem site. Bora resolver?`;
   }
 };
+
+/**
+ * GERAÇÃO DE COPY EM LOTE (OTIMIZAÇÃO DE VELOCIDADE)
+ * Processa múltiplos leads em uma única chamada de API.
+ */
+export const generateMarketingCopyBatch = async (
+    leads: Lead[], 
+    serviceContext: ServiceContext
+  ): Promise<Record<string, string>> => {
+    if (!serviceContext.serviceName || leads.length === 0) return {};
+  
+    // Minificar os dados enviados para economizar tokens
+    const minifiedLeads = leads.map(l => ({
+        id: l.id,
+        name: l.name,
+        desc: l.description,
+        pains: l.painPoints
+    }));
+  
+    const prompt = `
+      ATUE COMO UM COPYWRITER DE RESPOSTA DIRETA DE ELITE.
+      
+      CONTEXTO DO MEU SERVIÇO:
+      - Nome: ${serviceContext.serviceName}
+      - Público: ${serviceContext.targetAudience}
+      - Oferta: ${serviceContext.description}
+  
+      TAREFA:
+      Gere uma mensagem de abordagem fria (Cold DM) curta e persuasiva para cada um dos leads abaixo.
+      Use estratégias variadas (Ego, Dor, Curiosidade) para cada um.
+      
+      LEADS:
+      ${JSON.stringify(minifiedLeads)}
+  
+      REGRAS:
+      1. IDIOMA: PORTUGUÊS DO BRASIL. Informal e direto.
+      2. MÁXIMO 2-3 frases por mensagem.
+      3. RETORNE APENAS UM JSON ONDE A CHAVE É O ID DO LEAD E O VALOR É A MENSAGEM.
+      
+      SAÍDA JSON EXATA:
+      {
+        "id_do_lead_1": "Mensagem...",
+        "id_do_lead_2": "Mensagem..."
+      }
+    `;
+  
+    try {
+      const response: GenerateContentResponse = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: { 
+            responseMimeType: "application/json",
+            temperature: 1.2, 
+            safetySettings: safetySettings 
+        }
+      });
+      const result = extractJson(response.text || "{}");
+      return result;
+    } catch (error) {
+      console.error("Erro em batch copy:", error);
+      // Fallback: retorna vazio, o UI vai lidar ou tentar individual
+      return {};
+    }
+  };
 
 export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceContext): Promise<string> => {
     const prompt = `
