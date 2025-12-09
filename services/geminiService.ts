@@ -1,8 +1,10 @@
-
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Lead, GroundingSource, BusinessSize, ServiceContext } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// @ts-ignore: O Vite substitui process.env.API_KEY no build, mas o TSC reclama. Ignoramos o erro.
+const apiKey = process.env.API_KEY;
+
+const ai = new GoogleGenAI({ apiKey: apiKey || "" });
 
 // Helper to clean JSON string from Markdown code blocks
 const extractJson = (text: string): any => {
