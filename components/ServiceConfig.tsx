@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { ServiceContext, ServiceInsights } from '../types';
-import { SettingsIcon, SaveIcon, MoneyIcon, MagicIcon, ChartIcon, TargetIcon, LightningIcon } from './ui/Icons';
+import { SettingsIcon, SaveIcon, MoneyIcon, MagicIcon, ChartIcon, TargetIcon, LightningIcon, TrashIcon } from './ui/Icons';
 import { generateServiceInsights, generateKillerDifferential } from '../services/geminiService';
 
 interface ServiceConfigProps {
@@ -79,22 +79,46 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
       }
   };
 
+  const handleClear = () => {
+      if (window.confirm("Tem certeza que deseja limpar todas as informações do seu serviço?")) {
+          const emptyContext: ServiceContext = {
+              serviceName: '',
+              description: '',
+              targetAudience: '',
+              ticketValue: 1500,
+              insights: undefined
+          };
+          setContext(emptyContext);
+          onSave(emptyContext);
+      }
+  };
+
   return (
     <div className="max-w-4xl mx-auto animate-fade-in pb-20">
       <div className="bg-surface border border-slate-800 rounded-xl p-6 md:p-8 shadow-xl relative overflow-hidden">
         {/* Decorative Background */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-accent/5 rounded-full blur-[80px] -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
 
-        <div className="flex items-center mb-6">
-          <div className="p-3 bg-accent/10 rounded-lg mr-4 text-accent">
-            <SettingsIcon className="w-8 h-8" />
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center">
+              <div className="p-3 bg-accent/10 rounded-lg mr-4 text-accent">
+                <SettingsIcon className="w-8 h-8" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">Configuração do Seu Serviço</h2>
+                <p className="text-slate-400 text-sm mt-1">
+                  Descreva o que você vende. A IA usará isso para criar a estratégia perfeita.
+                </p>
+              </div>
           </div>
-          <div>
-            <h2 className="text-2xl font-bold text-white">Configuração do Seu Serviço</h2>
-            <p className="text-slate-400 text-sm mt-1">
-              Descreva o que você vende. A IA usará isso para encontrar leads qualificados e traçar a melhor estratégia.
-            </p>
-          </div>
+          <button 
+            onClick={handleClear}
+            className="flex items-center gap-1 text-xs font-bold text-red-400 hover:text-red-300 bg-red-900/10 hover:bg-red-900/20 px-3 py-2 rounded border border-red-900/30 transition-colors"
+            title="Limpar todos os campos"
+          >
+              <TrashIcon className="w-4 h-4" />
+              Limpar Tudo
+          </button>
         </div>
 
         <form onSubmit={handleSaveAndGenerate} className="space-y-6 relative z-10">
@@ -158,11 +182,11 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
                     type="button"
                     onClick={handleCreateKillerOffer}
                     disabled={isGeneratingOffer}
-                    className="flex items-center space-x-1 text-[10px] font-bold bg-purple-600/20 text-purple-300 hover:bg-purple-600 hover:text-white px-2 py-1 rounded border border-purple-500/30 transition-all active:scale-95"
-                    title="Clique várias vezes para ver opções diferentes!"
+                    className="flex items-center space-x-1 text-[10px] font-bold bg-purple-600/20 text-purple-300 hover:bg-purple-600 hover:text-white px-3 py-1.5 rounded-lg border border-purple-500/30 transition-all active:scale-95 shadow-lg shadow-purple-900/20"
+                    title="Cada clique gera uma oferta totalmente nova e única!"
                 >
                     <LightningIcon className={`w-3 h-3 ${isGeneratingOffer ? 'animate-spin' : ''}`} />
-                    <span>{isGeneratingOffer ? "Reescrevendo..." : "🔄 Gerar Variação de Oferta Irresistível"}</span>
+                    <span>{isGeneratingOffer ? "Criando Mágica..." : "⚡ Criar Oferta Perfeita (Variação Infinita)"}</span>
                 </button>
             </div>
             
@@ -173,6 +197,9 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
               className="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:border-accent transition-colors resize-none font-sans leading-relaxed"
               required
             />
+            <p className="text-[10px] text-slate-500 mt-1 ml-1 italic">
+                Dica: Clique no botão de raio várias vezes. A IA usará diferentes gatilhos mentais (Escassez, Status, Garantia) a cada clique.
+            </p>
           </div>
 
           <div className="flex items-center justify-end pt-4">

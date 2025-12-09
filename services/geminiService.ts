@@ -390,33 +390,44 @@ export const generateServiceInsights = async (serviceName: string, description: 
 };
 
 /**
- * OFERTA IRRESISTÍVEL (AGORA COM VARIAÇÃO DE FRAMEWORKS)
+ * OFERTA IRRESISTÍVEL (AGORA COM VARIAÇÃO DE FRAMEWORKS PODEROSOS)
  */
 export const generateKillerDifferential = async (serviceName: string, currentDescription: string): Promise<string> => {
-    // ROLETA DE FRAMEWORKS DE OFERTA
+    // ROLETA DE FRAMEWORKS DE COPYWRITING DE ELITE
     const frameworks = [
-        "GARANTIA DE RISCO REVERSO (Se eu falhar, eu te pago)",
-        "MECANISMO ÚNICO (Nome proprietário estranho e curioso)",
+        "GARANTIA DE RISCO REVERSO (Se eu falhar, eu te pago + bônus)",
+        "MECANISMO ÚNICO (Nome proprietário + Método novo)",
         "OFERTA MAFIOSA (Uma oferta tão boa que recusar parece burrice)",
-        "ANTI-AGÊNCIA (Nós não fazemos X, nós fazemos Y que gera dinheiro)"
+        "ANTI-AGÊNCIA (Nós não fazemos X [coisa chata], nós fazemos Y [resultado])",
+        "A PROMESSA DE VELOCIDADE (Resultado em X dias ou grátis)",
+        "O INIMIGO COMUM (Não é culpa sua, é culpa do 'Método Tradicional')",
+        "IDENTIDADE E STATUS (Não compre um site, compre a autoridade de Líder de Mercado)"
     ];
+    
+    // Escolhe um aleatoriamente para garantir que cada clique gere algo novo
     const selectedFramework = frameworks[Math.floor(Math.random() * frameworks.length)];
 
     const prompt = `
-      ATUE COMO UM ENGENHEIRO DE OFERTAS (Nível Alex Hormozi).
+      ATUE COMO O MELHOR COPYWRITER DO MUNDO (Nível Alex Hormozi / Dan Kennedy).
       
-      FRAMEWORK SELECIONADO: ${selectedFramework}.
-      (Use este estilo agressivamente para diferenciar a resposta das anteriores).
+      FRAMEWORK ESCOLHIDO PARA ESTA VERSÃO: ${selectedFramework}.
+      (Você DEVE usar a psicologia deste framework especificamente).
 
       O USUÁRIO VENDE: "${serviceName}"
-      DETALHES: "${currentDescription}"
+      CONTEXTO ATUAL: "${currentDescription}"
 
-      OBJETIVO: Criar uma promessa ÚNICA, EXCLUSIVA e OUSADA.
+      OBJETIVO: Reescrever a oferta para ser ÚNICA, EXCLUSIVA e OUSADA.
       
-      PROIBIDO: "Melhoro seus resultados", "Serviço de qualidade", "Otimização".
-      OBRIGATÓRIO: Nomes criativos, Garantias com números, Promessas de Tempo.
+      REGRAS DE OURO:
+      1. NUNCA use palavras genéricas como "Otimização", "Qualidade", "Melhor serviço".
+      2. USE Nomes Próprios (Crie um nome para o método).
+      3. USE Números Específicos (Dias, Reais, Porcentagem).
+      4. CRIE uma Garantia Condicional forte.
+      5. SEJA CURTO e IMPACTANTE (Máximo 3 frases).
 
-      SAÍDA: Um parágrafo curto e matador (2-3 frases) em PORTUGUÊS DO BRASIL.
+      Exemplo do tom desejado: "Instalamos o Protocolo Venda-Automática em 14 dias. Se não gerar 5 leads na primeira semana, devolvo seu investimento em dobro."
+
+      SAÍDA: Apenas o texto da oferta em PORTUGUÊS DO BRASIL.
     `;
     
     try {
