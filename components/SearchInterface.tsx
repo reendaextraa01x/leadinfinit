@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { SearchIcon, HistoryIcon, TrashIcon, FilterIcon, TargetIcon, MagicIcon } from './ui/Icons';
 import { BusinessSize, SearchHistoryItem, SearchFilters, ServiceContext } from '../types';
@@ -76,7 +77,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
       try {
           const prompts = await generateTacticalPrompts(serviceContext);
           setSuggestedPrompts(prompts);
-          // AUTO-FILL BEST IDEA
+          // AUTO-FILL BEST IDEA (A MELHOR IDEIA VEM PRIMEIRO)
           if (prompts.length > 0) {
               setCustomInstruction(prompts[0]);
           }
@@ -88,7 +89,6 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
   }
 
   // Estimativa mais realista: ~3.5s por lead + overhead de inicialização
-  // Se for 20 leads, pode levar até 70-80s (tempo de loop)
   const estimatedSeconds = Math.ceil((count * 3.5) + 5);
 
   return (
@@ -289,28 +289,31 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
                                 type="button"
                                 onClick={handleGeneratePrompts}
                                 disabled={isGeneratingPrompts}
-                                className="text-[10px] flex items-center gap-1 text-accent hover:text-white transition-colors bg-accent/10 px-2 py-1 rounded"
+                                className="text-[10px] flex items-center gap-1 text-accent hover:text-white transition-colors bg-accent/10 px-2 py-1 rounded border border-accent/20"
                             >
                                 <MagicIcon className={`w-3 h-3 ${isGeneratingPrompts ? 'animate-spin' : ''}`} />
-                                ✨ Gerar Ideias de Busca
+                                {isGeneratingPrompts ? "Gerando Tática..." : "✨ Gerar Ideias de Busca"}
                             </button>
                         </div>
                         
                         {/* SUGGESTED PROMPTS CHIPS */}
                         {suggestedPrompts.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mb-2 animate-fade-in">
-                                {suggestedPrompts.map((prompt, idx) => (
-                                    <button
-                                        key={idx}
-                                        type="button"
-                                        onClick={() => setCustomInstruction(prompt)}
-                                        className={`text-[10px] px-2 py-1 rounded border transition-colors text-left
-                                            ${customInstruction === prompt ? 'bg-accent/20 border-accent text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'}
-                                        `}
-                                    >
-                                        "{prompt}"
-                                    </button>
-                                ))}
+                            <div className="flex flex-col gap-2 mb-3 animate-fade-in bg-slate-900/30 p-2 rounded border border-slate-800">
+                                <span className="text-[9px] text-slate-500 uppercase font-bold">Sugestões Táticas (Clique para trocar):</span>
+                                <div className="flex flex-wrap gap-2">
+                                    {suggestedPrompts.map((prompt, idx) => (
+                                        <button
+                                            key={idx}
+                                            type="button"
+                                            onClick={() => setCustomInstruction(prompt)}
+                                            className={`text-[10px] px-2 py-1 rounded border transition-colors text-left
+                                                ${customInstruction === prompt ? 'bg-accent/20 border-accent text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'}
+                                            `}
+                                        >
+                                            {idx + 1}. "{prompt}"
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         )}
 

@@ -1,3 +1,4 @@
+
 // @ts-nocheck
 declare var process: any;
 
@@ -73,6 +74,11 @@ export const generateLeads = async (
   customInstruction?: string
 ): Promise<{ leads: Lead[], sources: GroundingSource[] }> => {
   
+  // STOPPER DE SEGURANÇA: Se não tiver API KEY, não tenta buscar
+  if (!process.env.API_KEY || process.env.API_KEY.includes('YOUR_KEY')) {
+      throw new Error("API Key não configurada. Configure no Vercel.");
+  }
+
   let allLeads: Lead[] = [];
   let allSources: GroundingSource[] = [];
   let attempts = 0;
@@ -199,18 +205,18 @@ export const generateLeads = async (
                 );
                 if (isDuplicate) return false;
 
-                // FILTRO DE SEGURANÇA:
-                // Se a IA não trouxe telefone, a gente descarta (o usuário quer leads contatáveis).
-                // Mas somos flexíveis com o formato.
+                // FILTRO DE SEGURANÇA (Telefone Obrigatório)
                 if (!lead.phone || lead.phone === "Não encontrado") return false;
 
-                // Filtro "Mobile Only" (Apenas se o usuário marcou a opção)
+                // Filtro "Mobile Only" (Apenas Celular)
                 if (filters?.mobileOnly) {
                    const clean = cleanPhone(lead.phone);
-                   // Se não conseguimos limpar o telefone, descarta
-                   if (!clean) return false;
-                   // Se for muito curto, descarta
-                   if (clean.length < 8) return false;
+                   // Se não tem número limpo ou é curto (fixo s/ DDD as vezes vem errado, ou números curtos estranhos)
+                   // No Brasil: Celulares tem 11 dígitos, Fixos 10. 
+                   // Vamos garantir pelo menos 8 dígitos para não descartar internacionais,
+                   // mas para BR, Mobile geralmente começa com 9 na posição correta.
+                   // Para simplicidade e robustez, filtramos apenas lixo muito curto.
+                   if (!clean || clean.length < 8) return false;
                 }
 
                 return true;
@@ -222,8 +228,14 @@ export const generateLeads = async (
             }
         }
     
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Erro na tentativa ${attempts}:`, error);
+        
+        // Se for erro de permissão (403/401), aborta para não travar o loop
+        if (error.toString().includes('403') || error.toString().includes('401') || error.message?.includes('API key')) {
+             throw new Error("Chave de API inválida ou bloqueada pelo Google. Verifique o Vercel.");
+        }
+
         // Não para o loop, tenta a próxima query
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
@@ -251,6 +263,7 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
         REGRAS:
         - Devem ser comandos diretos de filtro.
         - Devem focar em "Dores" que o serviço resolve.
+        - IDIOMA: PT-BR
         
         SAÍDA JSON ARRAY: ["Ideia 1", "Ideia 2", "Ideia 3"]
         NÃO ESCREVA NADA ALÉM DO JSON.
