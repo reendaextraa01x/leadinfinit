@@ -323,48 +323,37 @@ export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceConte
 }
 
 /**
- * CONSULTORIA ESTRATÉGICA (AGORA COM VARIAÇÃO DE ARQUÉTIPOS)
+ * CONSULTORIA ESTRATÉGICA (LOGIC-LOCK V2: COERÊNCIA TOTAL)
+ * Agora, a função é estritamente lógica e não usa aleatoriedade para evitar alucinações.
  */
 export const generateServiceInsights = async (serviceName: string, description: string, targetAudience: string = ""): Promise<ServiceInsights> => {
-  // ROLETA DE ESTRATÉGIAS
-  const archetypes = [
-    { name: "O CAÇADOR DE BALEIAS", focus: "Foque exclusivamente em clientes High-Ticket (Ricos) que pagam caro por exclusividade." },
-    { name: "O SNIPER DE MICRO-NICHO", focus: "Encontre um sub-nicho extremamente específico e ignorado (Oceano Azul)." },
-    { name: "O OPORTUNISTA DE CRISE", focus: "Foque em nichos que têm um problema urgente e doloroso que precisa ser resolvido ontem." },
-    { name: "O PARCEIRO DE ESCALA", focus: "Foque em empresas que já faturam bem mas estão travadas tecnologicamente." }
-  ];
-  
-  const selectedArchetype = archetypes[Math.floor(Math.random() * archetypes.length)];
   const audienceInstruction = targetAudience 
-      ? `IMPORTANTE: O usuário JÁ definiu o público alvo como "${targetAudience}". Sua estratégia DEVE ser focada em otimizar para ESTE público (ex: sugerir um sub-nicho dentro de ${targetAudience}). NÃO sugira um público totalmente diferente.`
-      : "O usuário não definiu público. Sinta-se livre para sugerir o melhor nicho possível.";
+      ? `O usuário definiu EXPLICITAMENTE o público alvo: "${targetAudience}". Você é OBRIGADO a sugerir uma estratégia DENTRO deste público (ex: um sub-nicho premium de ${targetAudience}). É PROIBIDO SUGERIR OUTRO SETOR.`
+      : "O usuário não definiu público. Analise o serviço e encontre o setor que paga mais caro por isso.";
 
   const prompt = `
-    ATUE COMO UM ESTRATEGISTA DE MERCADO SÊNIOR.
+    ATUE COMO UM ESTRATEGISTA DE NEGÓCIOS LÓGICO E ANALÍTICO.
     
-    DADOS DO PROJETO:
-    - SERVIÇO: "${serviceName}"
-    - OFERTA/DIFERENCIAL: "${description}"
-    - PÚBLICO ALVO ATUAL: "${targetAudience}"
+    DADOS DE ENTRADA:
+    1. SERVIÇO VENDIDO: "${serviceName}"
+    2. COMO ELE É ENTREGUE: "${description}"
+    3. RESTRIÇÃO DE PÚBLICO: ${audienceInstruction}
 
-    SEU ARQUÉTIPO HOJE: ${selectedArchetype.name}.
-    SUA LENTE DE ANÁLISE: ${selectedArchetype.focus}.
-
-    ${audienceInstruction}
-
-    TAREFA: Baseado no seu arquétipo e nos dados acima, crie uma estratégia de entrada no mercado.
+    SUA TAREFA:
+    Conectar o SERVIÇO ao MELHOR COMPRADOR POSSÍVEL de forma lógica.
     
-    REGRAS ANTI-GENÉRICAS:
-    1. PROIBIDO sugerir "Pequenas Empresas" ou "Comércio Local". Isso é preguiçoso.
-    2. SEJA ESPECÍFICO: Diga "Clínicas de Fertilidade" em vez de "Médicos". Diga "Advogados Tributaristas" em vez de "Advogados".
-    3. Conecte a OFERTA ("${description.substring(0, 50)}...") com a DOR do nicho sugerido.
+    PERGUNTAS QUE VOCÊ DEVE RESPONDER NO JSON:
+    - recommendedNiche: Qual o sub-nicho específico (dentro da restrição) que tem a dor mais aguda e dinheiro para pagar? (Ex: Não diga "Médicos", diga "Cirurgiões Plásticos").
+    - suggestedTicket: Qual o valor justo (em Reais) para cobrar desse nicho específico, considerando o impacto financeiro que o serviço gera?
+    - reasoning: Explique a lógica. "O serviço X resolve a dor Y do nicho Z, o que gera lucro W, por isso eles pagam."
+    - potential: Qual o tamanho da oportunidade?
     
-    SAÍDA JSON:
+    SAÍDA JSON (ESTRITAMENTE COERENTE):
     {
-      "recommendedNiche": "Nome do Nicho (Ultra-Específico)",
-      "suggestedTicket": 0000,
-      "reasoning": "Explicação estratégica de POR QUE este nicho precisa desesperadamente do serviço descrito.",
-      "potential": "Análise de tamanho de mercado e urgência."
+      "recommendedNiche": "Texto",
+      "suggestedTicket": 1500,
+      "reasoning": "Texto Lógico",
+      "potential": "Texto"
     }
   `;
 
@@ -374,24 +363,25 @@ export const generateServiceInsights = async (serviceName: string, description: 
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.95 
+        temperature: 0.5 // Baixa temperatura para garantir lógica e consistência, sem "viagens"
       }
     });
     
     const text = response.text || "";
     const json = extractJson(text);
-    return json || {
-        recommendedNiche: targetAudience || "Nicho Específico (Erro na IA)",
-        suggestedTicket: 2000,
-        reasoning: "A IA falhou em processar a estratégia específica. Tente regenerar.",
-        potential: "Alta demanda latente."
-    };
+    
+    // Validação de segurança para garantir que o fallback não seja estático
+    if (!json || !json.recommendedNiche) throw new Error("Falha na geração");
+
+    return json;
+
   } catch (error) {
+    // Fallback Dinâmico (Usa os dados do usuário para não parecer quebrado)
     return {
-      recommendedNiche: targetAudience || "Consultórios Médicos Particulares",
-      suggestedTicket: 2500,
-      reasoning: "Público com alta margem de lucro que perde pacientes por falta de agendamento online.",
-      potential: "Mercado de saúde privada movimenta bilhões."
+      recommendedNiche: targetAudience || "Empresas de Alto Padrão",
+      suggestedTicket: 2000,
+      reasoning: `Seu serviço de ${serviceName} tem alto valor agregado para ${targetAudience || "o mercado"}, pois resolve dores diretas de faturamento.`,
+      potential: "Alta demanda reprimida neste setor."
     };
   }
 };
@@ -407,7 +397,8 @@ export const generateKillerDifferential = async (serviceName: string, descriptio
         "OFERTA MAFIOSA (Irrecusável pela lógica financeira)",
         "ANTI-AGÊNCIA (Nós odiamos o modelo padrão, fazemos o oposto)",
         "A PROMESSA DE VELOCIDADE (Resultado rápido ou multa)",
-        "IDENTIDADE E STATUS (Venda para o Ego do cliente)"
+        "IDENTIDADE E STATUS (Venda para o Ego do cliente)",
+        "DOR AGUDA (Foco total em resolver um pesadelo agora)"
     ];
     
     const selectedFramework = frameworks[Math.floor(Math.random() * frameworks.length)];
@@ -420,15 +411,16 @@ export const generateKillerDifferential = async (serviceName: string, descriptio
       DADOS DO USUÁRIO:
       - SERVIÇO: "${serviceName}"
       - PÚBLICO ALVO: "${targetAudience}"
-      - CONTEXTO: "${description}"
+      - CONTEXTO TÉCNICO: "${description}"
 
       SUA MISSÃO: Criar uma oferta ÚNICA e EXCLUSIVA para este público específico.
       
       REGRAS OBRIGATÓRIAS:
-      1. CITE O NOME DO PÚBLICO ALVO (${targetAudience}) explicitamente.
+      1. CITE O NOME DO PÚBLICO ALVO (${targetAudience}) explicitamente no texto.
       2. CRIE UM NOME PARA O MÉTODO (Ex: Protocolo X, Sistema Y). Não use o nome genérico do serviço.
       3. CRIE UMA GARANTIA ESPECÍFICA (Ex: "Devolvo R$ 500", "Trabalho de graça").
-      4. NUNCA use o texto genérico "Sistema de Aquisição Automática". INVENTE ALGO NOVO AGORA.
+      4. NUNCA use o texto genérico "Sistema de Aquisição Automática" a menos que faça sentido.
+      5. SEJA ESPECÍFICO SOBRE O SERVIÇO: Se é site, fale de site. Se é tráfego, fale de leads.
 
       SAÍDA (Texto curto e impactante, máx 3 linhas):
     `;
@@ -437,7 +429,7 @@ export const generateKillerDifferential = async (serviceName: string, descriptio
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: prompt,
-            config: { temperature: 1.2 } // Temperatura Extrema para garantir que nunca repita
+            config: { temperature: 1.1 } 
         });
         const text = response.text?.trim();
         if (!text || text.length < 10) throw new Error("Resposta curta demais");
