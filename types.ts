@@ -1,4 +1,5 @@
 
+
 declare var process: any;
 
 export type LeadStatus = 'new' | 'contacted' | 'negotiation' | 'closed';
@@ -15,6 +16,8 @@ export interface Lead {
   status: LeadStatus; // Kanban Status
   score: LeadScore;   // AI Rating
   audit?: string;     // AI Generated Technical Audit
+  painPoints?: string[]; // Specific problems detected (e.g., "No Website", "Bad Reviews")
+  matchReason?: string;  // Why this lead is a perfect fit for the user's service
 }
 
 export type BusinessSize = 'small' | 'medium' | 'large';

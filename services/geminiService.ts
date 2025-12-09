@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights } from "../types";
 
@@ -30,7 +31,7 @@ const cleanPhone = (phone: string): string | null => {
 // Calculate 'Lead Temperature'
 const calculateLeadScore = (lead: any): LeadScore => {
     // Logic: No website or Broken Website = HOT Opportunity for web services
-    if (!lead.website || lead.website === "Not Found") {
+    if (!lead.website || lead.website === "Not Found" || lead.website === "") {
         return 'hot';
     }
     // Has website but also has Instagram (Means they are trying but might need optimization)
@@ -49,27 +50,26 @@ export const generateLeads = async (
   serviceContext?: ServiceContext
 ): Promise<{ leads: Lead[], sources: GroundingSource[] }> => {
   
-  let sizeInstruction = "";
-  if (size === 'small') {
-    sizeInstruction = "IMPORTANT: Focus strictly on SMALL, LOCAL businesses, freelancers, or service providers. Look for entities that might have poor websites, no websites, or just a social media page. These are potential clients for website creation services.";
-  } else if (size === 'medium') {
-    sizeInstruction = "Focus on MEDIUM-sized established businesses. They likely have a website but it might be outdated, or they are well-known locally but not nationally.";
-  } else {
-    sizeInstruction = "Focus on LARGE, FAMOUS market leaders and established brands in this region.";
-  }
-
-  let contextInstruction = "";
+  // Construct a Context-Aware Prompt for "Hunter Mode"
+  let serviceStrategy = "";
   if (serviceContext && serviceContext.serviceName) {
-    contextInstruction = `
-    CONTEXT & FILTERING STRATEGY:
-    The user is a service provider offering: "${serviceContext.serviceName}".
-    Their Offer/Description: "${serviceContext.description}".
-    ${serviceContext.targetAudience ? `Target Audience specifics: ${serviceContext.targetAudience}` : ""}
+    serviceStrategy = `
+    >>> HUNTER MODE ACTIVATED: HIGH QUALITY FILTERING <<<
+    THE USER SELLS: "${serviceContext.serviceName}"
+    OFFER DESCRIPTION: "${serviceContext.description}"
     
-    CRITICAL: Filter the results to find businesses that SPECIFICALLY need this service.
-    Example: If the service is "Website Creation", prioritize finding businesses that DO NOT have a website listed, or have a very basic/broken online presence.
+    YOUR MISSION: Find businesses that have a SPECIFIC PAIN POINT that this service solves.
+    Examples of what to look for based on user service:
+    - If user sells SITES -> Find businesses with NO website, BROKEN websites, or UGLY/OLD websites.
+    - If user sells ADS/TRAFFIC -> Find businesses with low social engagement or who are invisible on Google.
+    - If user sells SOCIAL MEDIA -> Find businesses with inactive Instagrams or bad photos.
     
-    In the "description" field of the JSON result, explain specifically WHY this lead is a good fit for the user's service "${serviceContext.serviceName}". (e.g., "Doesn't have a website", "Low social engagement").
+    Do NOT just list random businesses. List businesses that are "Easy Wins" for this service provider.
+    `;
+  } else {
+    serviceStrategy = `
+    >>> HUNTER MODE ACTIVATED <<<
+    Find businesses that look like they need Digital Modernization (No website, old branding, low reviews).
     `;
   }
 
@@ -77,43 +77,36 @@ export const generateLeads = async (
   const requestCount = Math.ceil(count * 1.5);
 
   const prompt = `
-    I need you to act as an advanced lead generation bot. 
-    Task: Search the internet for businesses or professionals in the niche: "${niche}" located in "${location}".
+    ACT AS AN ELITE SALES INTELLIGENCE BOT.
     
-    ${sizeInstruction}
-
-    ${contextInstruction}
+    TARGET:
+    - Niche: "${niche}"
+    - Location: "${location}"
+    - Size: ${size} (Small = Local/Freelancer, Medium = Established, Large = Market Leader)
     
-    Goal: Find AT LEAST ${count} valid results. To be safe, try to find ${requestCount}.
-    Constraint: Do not include these names: ${existingNames.join(", ")}.
-
-    *** STRICT RULE - PHONE NUMBERS ARE MANDATORY ***
-    1. You MUST find a valid phone number for every single entry.
-    2. EXCLUDE any business where you cannot find a working phone number.
-    3. Dig deep into Google Maps, Facebook "About", Instagram Bios (look for "WhatsApp", "Contato", "Tel").
-    4. PREFER mobile numbers (WhatsApp capable, starting with 9 in Brazil).
+    ${serviceStrategy}
     
-    Information required for each lead:
-    1. Business/Person Name
-    2. Phone Number (MANDATORY. If not found, skip this business entirely.)
-    3. Instagram Handle/URL (PRIORITY: Search specifically for their Instagram. If found, provide full URL. If not, "Not Found")
-    4. Short Description (1 sentence, WRITTEN IN PORTUGUESE. If context is provided, explain why they need the service.)
-    5. Website URL (if available)
+    REQUIREMENTS:
+    1. FIND ${requestCount} POTENTIAL LEADS.
+    2. *** STRICT TELEPHONE RULE ***: You MUST find a valid phone number (Mobile/WhatsApp preferred). If no phone, DO NOT include.
+    3. EXCLUDE these existing names: ${existingNames.join(", ")}.
+    
+    FOR EACH LEAD, YOU MUST IDENTIFY:
+    - "painPoints": An array of specific problems you detected (e.g., ["No Website", "Bad Reviews", "Inactive Instagram"]).
+    - "matchReason": A short persuasive sentence on why this lead is ALMOST IMPOSSIBLE NOT TO BUY. (e.g., "They have 5k followers but no link in bio - losing money daily.").
 
-    Output Format:
-    You MUST return the data as a STRICT JSON Array wrapped in a code block. 
-    Structure:
+    Output Format: STRICT JSON Array inside a code block.
     [
       {
         "name": "Business Name",
-        "phone": "(11) 99999-9999",
+        "phone": "(XX) 9XXXX-XXXX",
         "instagram": "https://instagram.com/...",
-        "description": "Descrição em Português...",
-        "website": "..."
+        "website": "URL or 'Not Found'",
+        "description": "Short description of the business.",
+        "painPoints": ["No Website", "Low Google Rating"],
+        "matchReason": "Ideal target because they have high foot traffic but zero digital presence."
       }
     ]
-
-    Ensure the data is accurate based on the search results.
   `;
 
   try {
@@ -149,9 +142,11 @@ export const generateLeads = async (
         instagram: (item.instagram === "Not Found" || !item.instagram) ? null : item.instagram,
         description: item.description || "Sem descrição disponível.",
         website: (item.website === "Not Found" || !item.website) ? undefined : item.website,
+        painPoints: Array.isArray(item.painPoints) ? item.painPoints : [],
+        matchReason: item.matchReason || "Oportunidade de modernização digital.",
         confidenceScore: 1,
         status: 'new' as LeadStatus,
-        score: calculateLeadScore(item) // Calculate Hot/Warm
+        score: calculateLeadScore(item) // Calculate Hot/Warm based on website status
       }))
       // THE FILTER: Remove anything that doesn't have a valid phone number
       .filter((lead) => {
@@ -192,6 +187,11 @@ export const generateMarketingCopy = async (
   ];
   const selectedStrategy = strategies[Math.floor(Math.random() * strategies.length)];
 
+  // Inject specific pain points into the copy prompt if available
+  const painPointsInfo = lead.painPoints && lead.painPoints.length > 0 
+    ? `Specific Problems Detected: ${lead.painPoints.join(", ")}`
+    : "Problem: General lack of digital optimization.";
+
   const prompt = `
     You are a world-class Direct Response Copywriter known for "Cold DMs" that get 80% response rates.
     You are aggressive, persuasive, and use psychological triggers.
@@ -201,7 +201,8 @@ export const generateMarketingCopy = async (
     The Client (Receiver):
     - Name: ${lead.name}
     - Details: "${lead.description}"
-    - Website Status: ${lead.website ? "Has website: " + lead.website : "NO WEBSITE (Critical Pain Point!)"}
+    - ${painPointsInfo}
+    - Match Reason: ${lead.matchReason || "N/A"}
     
     My Service (Sender):
     - Service: ${serviceContext.serviceName}
@@ -211,9 +212,8 @@ export const generateMarketingCopy = async (
     1. Language: Portuguese (Brazil). Informal but sharp. Use slang like "Opa", "Fala [Nome]".
     2. NO "Assunto:". Just the body text.
     3. SHORT. Mobile optimized. Max 3-4 sentences broken up.
-    4. EXTREMELY PERSUASIVE. Create FOMO (Fear of missing out) or Urgent Pain.
-    5. Do NOT sound like a robot. Sound like a busy expert giving them a heads up.
-    6. If they have no website, act shocked. "Como vocês vendem sem site hoje em dia?"
+    4. EXTREMELY PERSUASIVE. Focus on the PAIN POINTS detected.
+    5. If they have "No Website", use that as the main hook.
     
     Output ONLY the message text.
   `;
@@ -237,13 +237,14 @@ export const generateMarketingCopy = async (
  * Generates a Technical Audit (The Secret Weapon)
  */
 export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceContext): Promise<string> => {
+    const painContext = lead.painPoints ? `Known Issues: ${lead.painPoints.join(", ")}` : "";
+    
     const prompt = `
         ACT AS AN EXPERT AUDITOR FOR: ${serviceContext.serviceName || "Digital Marketing"}.
         TARGET: ${lead.name} (${lead.description}).
+        ${painContext}
         
         TASK: Create a mini "Technical Audit" finding 3 SPECIFIC PROBLEMS with their digital presence that justify buying the user's service.
-        If they have no website, Focus heavily on that.
-        If they have a website (${lead.website || 'none'}), assume typical errors (speed, mobile, seo).
         
         FORMAT:
         1. ❌ [Problem 1]

@@ -1,7 +1,8 @@
 
+
 import React from 'react';
 import { Lead } from '../types';
-import { InstagramIcon, PhoneIcon, GlobeIcon, WhatsAppIcon, SaveIcon, FireIcon } from './ui/Icons';
+import { InstagramIcon, PhoneIcon, GlobeIcon, WhatsAppIcon, SaveIcon, FireIcon, TargetIcon } from './ui/Icons';
 
 interface LeadCardProps {
   lead: Lead;
@@ -55,11 +56,35 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => 
           </button>
         </div>
 
-        <p className="text-slate-400 text-sm mb-6 line-clamp-3">
+        {/* Opportunity / Match Reason */}
+        {lead.matchReason && (
+             <div className="mb-4 bg-accent/10 border border-accent/20 rounded-lg p-3">
+                 <div className="flex items-center text-accent text-xs font-bold uppercase tracking-wide mb-1">
+                     <TargetIcon className="w-3 h-3 mr-1" />
+                     Oportunidade Detectada
+                 </div>
+                 <p className="text-xs text-slate-300 italic">
+                     "{lead.matchReason}"
+                 </p>
+             </div>
+        )}
+
+        <p className="text-slate-400 text-sm mb-4 line-clamp-2">
           {lead.description}
         </p>
 
-        <div className="space-y-3">
+        {/* Pain Points Badges */}
+        {lead.painPoints && lead.painPoints.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-6">
+                {lead.painPoints.map((point, i) => (
+                    <span key={i} className="px-2 py-1 bg-red-500/10 border border-red-500/20 text-red-300 text-[10px] rounded font-bold uppercase">
+                        {point}
+                    </span>
+                ))}
+            </div>
+        )}
+
+        <div className="space-y-3 mt-auto">
           {/* Phone & Actions */}
           <div className="flex flex-col gap-2">
             <div className={`flex items-center p-2 rounded-lg transition-colors ${hasValidPhone ? 'bg-slate-800/50 border border-slate-700/50' : 'text-slate-500'}`}>
