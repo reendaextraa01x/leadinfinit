@@ -45,14 +45,17 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
   const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([]);
   const [isGeneratingPrompts, setIsGeneratingPrompts] = useState(false);
 
-  // Dynamic loading text based on progress
+  // Dynamic loading text based on progress and count
   useEffect(() => {
     if (!isLoading) return;
-    if (progress < 20) setLoadingText("Iniciando busca...");
-    else if (progress < 40) setLoadingText("Vasculhando a web...");
-    else if (progress < 60) setLoadingText("Encontrando empresas...");
-    else if (progress < 80) setLoadingText("Validando telefones...");
-    else setLoadingText("Formatando dados...");
+    
+    // Feedback mais detalhado para buscas longas
+    if (progress < 15) setLoadingText("Iniciando radar de busca...");
+    else if (progress < 30) setLoadingText("Vasculhando o Google Maps e Redes...");
+    else if (progress < 50) setLoadingText("Filtrando telefones inválidos (Modo Hunter)...");
+    else if (progress < 70) setLoadingText("Buscando dados adicionais (Ciclo 2)...");
+    else if (progress < 90) setLoadingText("Validando qualidade dos leads...");
+    else setLoadingText("Formatando relatório final...");
   }, [progress, isLoading]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -84,8 +87,9 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
       }
   }
 
-  // Estimate time: roughly 2.5s per lead requested + 2s overhead
-  const estimatedTime = Math.ceil((count * 2.5) + 2);
+  // Estimativa mais realista: ~3.5s por lead + overhead de inicialização
+  // Se for 20 leads, pode levar até 70-80s (tempo de loop)
+  const estimatedSeconds = Math.ceil((count * 3.5) + 5);
 
   return (
     <div className="w-full max-w-4xl mx-auto mb-12 relative z-20">
@@ -173,7 +177,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
                 <div className="flex justify-between text-[10px] text-slate-600 px-1 mt-1">
                     <span>3</span>
                     <span>10</span>
-                    <span>20</span>
+                    <span className="text-accent font-bold">20 (Max)</span>
                 </div>
              </div>
 
@@ -208,7 +212,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
                       <span className="text-xs font-bold text-white">{Math.round(progress)}%</span>
                     </div>
                     <span className="text-[10px] text-slate-400">
-                      Estimativa: ~{estimatedTime} segundos
+                      Aguarde: ~{estimatedSeconds}s (Alta Qualidade)
                     </span>
                   </div>
                 </div>

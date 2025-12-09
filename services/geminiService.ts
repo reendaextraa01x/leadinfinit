@@ -6,25 +6,29 @@ import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadSta
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Helper ROBUSTO para limpar JSON
+// Helper ROBUSTO para limpar JSON (Versão Blindada v2)
 const extractJson = (text: string): any => {
   try {
+    // 1. Tenta encontrar blocos de código explícitos
     const jsonBlockMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```([\s\S]*?)```/);
     if (jsonBlockMatch) {
       return JSON.parse(jsonBlockMatch[1]);
     }
-    const arrayMatch = text.match(/\[[\s\S]*\]/);
-    if (arrayMatch) {
-      return JSON.parse(arrayMatch[0]);
+    
+    // 2. Tenta encontrar o array JSON bruto no texto
+    const firstBracket = text.indexOf('[');
+    const lastBracket = text.lastIndexOf(']');
+    
+    if (firstBracket !== -1 && lastBracket !== -1) {
+        const jsonCandidate = text.substring(firstBracket, lastBracket + 1);
+        return JSON.parse(jsonCandidate);
     }
-    const objectMatch = text.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      return JSON.parse(objectMatch[0]);
-    }
+
+    // 3. Fallback: Tenta parsear o texto todo
     return JSON.parse(text);
   } catch (e) {
     console.error("Falha crítica ao processar JSON da IA. Texto recebido:", text);
-    return null;
+    return []; // Retorna array vazio para não quebrar a app
   }
 };
 
@@ -46,158 +50,170 @@ const calculateLeadScore = (lead: any): LeadScore => {
     return 'cold';
 };
 
+/**
+ * BUSCADOR DE LEADS COM LÓGICA DE RETRY (LOOP)
+ * Garante que a quantidade solicitada seja atingida acumulando resultados.
+ */
 export const generateLeads = async (
   niche: string, 
   location: string, 
   size: BusinessSize,
-  count: number,
+  targetCount: number, // Quantos o usuário quer (ex: 20)
   existingNames: string[],
   serviceContext?: ServiceContext,
   filters?: SearchFilters,
   customInstruction?: string
 ): Promise<{ leads: Lead[], sources: GroundingSource[] }> => {
   
-  let serviceStrategy = "";
-  if (serviceContext && serviceContext.serviceName) {
-    serviceStrategy = `
-    >>> MODO CAÇADOR ATIVADO: FILTRO DE ALTA QUALIDADE <<<
-    O USUÁRIO VENDE: "${serviceContext.serviceName}"
-    DESCRIÇÃO DA OFERTA: "${serviceContext.description}"
-    PÚBLICO ALVO: "${serviceContext.targetAudience || 'Geral'}"
-    
-    SUA MISSÃO: Usar o Google Search para encontrar empresas reais com UMA DOR ESPECÍFICA que este serviço resolve.
-    Exemplos do que buscar:
-    - Se vende SITES -> Busque empresas SEM SITE, com sites QUEBRADOS ou FEIOS/ANTIGOS.
-    - Se vende TRÁFEGO -> Busque empresas invisíveis no Google ou com pouco engajamento.
-    - Se vende REDES SOCIAIS -> Busque empresas com Instagram abandonado ou fotos ruins.
-    
-    NÃO liste empresas aleatórias. Liste empresas que são "Vendas Fáceis" (Easy Wins).
-    `;
-  } else {
-    serviceStrategy = `
-    >>> MODO CAÇADOR ATIVADO <<<
-    Encontre empresas reais que pareçam precisar de Modernização Digital (Sem site, marca antiga, poucas avaliações).
-    `;
-  }
+  let allLeads: Lead[] = [];
+  let allSources: GroundingSource[] = [];
+  let attempts = 0;
+  const maxAttempts = 3; // Limite de segurança para não ficar em loop infinito
+  
+  // Lista negra temporária para esta sessão de busca
+  let currentSessionNames = [...existingNames];
 
-  let advancedFilters = "";
-  if (filters) {
-      if (filters.websiteRule === 'must_have') advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter um website ativo.\n";
-      if (filters.websiteRule === 'must_not_have') advancedFilters += "- OBRIGATÓRIO: O lead NÃO PODE ter website (ou deve estar quebrado/404).\n";
-      if (filters.mustHaveInstagram) advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter perfil no Instagram.\n";
-      if (filters.mobileOnly) advancedFilters += "- OBRIGATÓRIO: Priorize números de celular/WhatsApp ((XX) 9...).\n";
-  }
+  // O Loop continua enquanto não tivermos leads suficientes E não estourarmos as tentativas
+  while (allLeads.length < targetCount && attempts < maxAttempts) {
+      attempts++;
+      const leadsNeeded = targetCount - allLeads.length;
+      
+      // Pedimos sempre o triplo do que falta para garantir que o filtro de telefone não zere a lista
+      // Mas limitamos o pedido máximo por vez para não estourar tokens da IA
+      const requestBatchSize = Math.min(Math.max(leadsNeeded * 3, 10), 30);
 
-  let laserScope = "";
-  if (customInstruction) {
-      laserScope = `
-      >>> ORDEM PRIORITÁRIA (MIRA LASER - CRÍTICO) <<<
-      O usuário definiu uma regra específica de busca. SIGA ISSO ACIMA DE TUDO:
-      "${customInstruction}"
-      `;
-  }
+      console.log(`[Busca] Tentativa ${attempts}: Precisamos de ${leadsNeeded}, pedindo ${requestBatchSize}...`);
 
-  const requestCount = Math.ceil(count * 1.5);
-
-  const prompt = `
-    ATUE COMO UM SISTEMA DE INTELIGÊNCIA DE VENDAS DE ELITE (Focado no Brasil).
-    USE A FERRAMENTA DE BUSCA DO GOOGLE AGORA.
-    
-    ALVO:
-    - Nicho: "${niche}"
-    - Localização: "${location}"
-    - Porte: ${size} (Pequeno=Local/Iniciante, Médio=Estabelecido, Grande=Líder de Mercado/Famoso)
-    
-    ${serviceStrategy}
-    
-    ${advancedFilters}
-
-    ${laserScope}
-    
-    REQUISITOS OBRIGATÓRIOS:
-    1. ENCONTRE ${requestCount} LEADS REAIS (Empresas que existem).
-    2. *** REGRA DO TELEFONE ***: Você DEVE encontrar um número válido (Preferência Celular/WhatsApp). Se não tiver telefone, NÃO INCLUA.
-    3. EXCLUA estes nomes já existentes: ${existingNames.join(", ")}.
-    4. IDIOMA: TODA A SAÍDA DEVE SER EM PORTUGUÊS DO BRASIL (PT-BR).
-       - Traduza "No Website" para "Sem Site".
-       - Traduza "Not Found" para "Não encontrado".
-    
-    PARA CADA LEAD, IDENTIFIQUE:
-    - "painPoints": Lista de problemas detectados (Ex: ["Sem Site", "Avaliação Baixa", "Instagram Inativo"]). EM PORTUGUÊS.
-    - "matchReason": Uma frase curta e persuasiva do porquê esse lead vai comprar. EM PORTUGUÊS.
-    - "qualityTier": Classifique o poder de compra: 'opportunity' (Pequeno/Iniciante), 'high-ticket' (Estabelecido/Rico), 'urgent' (Com problemas críticos).
-
-    IMPORTANTE: RETORNE APENAS O ARRAY JSON. NÃO ESCREVA NADA ANTES NEM DEPOIS.
-    [
-      {
-        "name": "Nome do Negócio",
-        "phone": "(XX) 9XXXX-XXXX",
-        "instagram": "https://instagram.com/...",
-        "website": "URL ou 'Sem Site'",
-        "description": "Breve descrição do negócio em PT-BR.",
-        "painPoints": ["Sem Site", "Nota Baixa no Google"],
-        "matchReason": "Alvo ideal pois tem muito fluxo mas presença digital zero.",
-        "qualityTier": "high-ticket"
+      let serviceStrategy = "";
+      if (serviceContext && serviceContext.serviceName) {
+        serviceStrategy = `
+        CONTEXTO DO USUÁRIO (VENDEDOR):
+        - Vende: "${serviceContext.serviceName}"
+        - Alvo: "${serviceContext.targetAudience || 'Geral'}"
+        - Objetivo: Encontrar empresas que PRECISAM desse serviço.
+        `;
       }
-    ]
-  `;
+    
+      let advancedFilters = "";
+      if (filters) {
+          if (filters.websiteRule === 'must_have') advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter um website ativo listado.\n";
+          if (filters.websiteRule === 'must_not_have') advancedFilters += "- OBRIGATÓRIO: O lead NÃO PODE ter website (ou deve estar quebrado/404).\n";
+          if (filters.mustHaveInstagram) advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter perfil no Instagram.\n";
+          if (filters.mobileOnly) advancedFilters += "- PREFERÊNCIA: Priorize números de celular/WhatsApp ((XX) 9...).\n";
+      }
+    
+      const prompt = `
+        ATUE COMO UM EXTRACTOR DE DADOS DE NEGÓCIOS DE ELITE (Modo Hunter V3).
+        
+        SUA MISSÃO: Realizar uma busca profunda no Google para encontrar leads qualificados.
+        
+        PARÂMETROS DE BUSCA:
+        - Termo Principal: "${niche}"
+        - Localização: "${location}"
+        - Modificadores de Busca: "WhatsApp", "Contato", "Telefone", "Instagram"
+        
+        ${serviceStrategy}
+        ${advancedFilters}
+        ${customInstruction ? `ORDEM ESPECIAL (PRIORIDADE MÁXIMA): ${customInstruction}` : ""}
+        
+        REGRAS DE EXTRAÇÃO (CRÍTICO):
+        1. VOCÊ DEVE EXTRAIR ${requestBatchSize} NOVOS CANDIDATOS NESTA RODADA.
+        2. *** FILTRO DE TELEFONE ***: É INACEITÁVEL retornar um lead sem telefone.
+           - Busque no Google Maps, Rodapé de Sites, Bios de Instagram.
+           - Se não achar o telefone, DESCARTE O LEAD e busque outro.
+        3. IGNORAR ESTES NOMES (JÁ LISTADOS): ${currentSessionNames.join(", ")}.
+        4. IDIOMA: PORTUGUÊS (PT-BR).
+    
+        ESTRUTURA DE RESPOSTA (JSON ARRAY PURO):
+        [
+          {
+            "name": "Nome da Empresa",
+            "phone": "(XX) 9XXXX-XXXX", 
+            "instagram": "Link ou 'Não encontrado'",
+            "website": "Link ou 'Sem Site'",
+            "description": "O que eles fazem e qual o estado digital deles (ex: Site ruim, Sem insta).",
+            "painPoints": ["Sem Site", "Pouca Avaliação"],
+            "matchReason": "Motivo da escolha.",
+            "qualityTier": "high-ticket" | "opportunity" | "urgent"
+          }
+        ]
+      `;
+    
+      try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+            temperature: 0.7, 
+          },
+        });
+    
+        const text = response.text || "";
+        const rawLeads = extractJson(text);
+    
+        if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
+            const newSources = response.candidates[0].groundingMetadata.groundingChunks
+            .map((chunk: any) => chunk.web)
+            .filter((web: any) => web && web.uri && web.title)
+            .map((web: any) => ({ title: web.title, uri: web.uri }));
+            allSources = [...allSources, ...newSources];
+        }
+    
+        if (Array.isArray(rawLeads)) {
+            // Processamento e Filtragem Rigorosa
+            const validLeadsInBatch: Lead[] = rawLeads
+              .map((item: any, index: number) => ({
+                id: `${Date.now()}-${attempts}-${index}-${Math.random().toString(36).substr(2, 9)}`,
+                name: item.name || "Desconhecido",
+                phone: item.phone || "Não encontrado",
+                instagram: (item.instagram === "Not Found" || !item.instagram || item.instagram === "Não encontrado") ? null : item.instagram,
+                description: item.description || "Sem descrição disponível.",
+                website: (item.website === "Not Found" || !item.website || item.website === "Sem Site" || item.website === "Não encontrado") ? undefined : item.website,
+                painPoints: Array.isArray(item.painPoints) ? item.painPoints : [],
+                matchReason: item.matchReason || "Lead compatível com o nicho.",
+                confidenceScore: 1,
+                status: 'new' as LeadStatus,
+                score: calculateLeadScore(item),
+                qualityTier: item.qualityTier || 'opportunity'
+              }))
+              .filter((lead) => {
+                // Filtro 1: Telefone Válido
+                const isNotFound = lead.phone === "Não encontrado" || lead.phone === "Not Found" || !lead.phone;
+                const clean = cleanPhone(lead.phone);
+                if (isNotFound || !clean) return false;
 
-  try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        temperature: 0.7,
-      },
-    });
+                // Filtro 2: Duplicidade (Nome ou Telefone já existente nesta sessão)
+                const isDuplicate = currentSessionNames.some(existingName => 
+                    existingName.toLowerCase() === lead.name.toLowerCase() ||
+                    lead.phone.includes(existingName) // Verifica grosseira se telefone já foi usado como chave
+                );
+                
+                return !isDuplicate;
+              });
 
-    const text = response.text || "";
-    const rawLeads = extractJson(text);
-
-    let sources: GroundingSource[] = [];
-    if (response.candidates?.[0]?.groundingMetadata?.groundingChunks) {
-      sources = response.candidates[0].groundingMetadata.groundingChunks
-        .map((chunk: any) => chunk.web)
-        .filter((web: any) => web && web.uri && web.title)
-        .map((web: any) => ({ title: web.title, uri: web.uri }));
-    }
-
-    if (!Array.isArray(rawLeads)) {
-      return { leads: [], sources: [] };
-    }
-
-    const leads: Lead[] = rawLeads
-      .map((item: any, index: number) => ({
-        id: `${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
-        name: item.name || "Desconhecido",
-        phone: item.phone || "Não encontrado",
-        instagram: (item.instagram === "Not Found" || !item.instagram || item.instagram === "Não encontrado") ? null : item.instagram,
-        description: item.description || "Sem descrição disponível.",
-        website: (item.website === "Not Found" || !item.website || item.website === "Sem Site" || item.website === "Não encontrado") ? undefined : item.website,
-        painPoints: Array.isArray(item.painPoints) ? item.painPoints : [],
-        matchReason: item.matchReason || "Oportunidade de modernização digital.",
-        confidenceScore: 1,
-        status: 'new' as LeadStatus,
-        score: calculateLeadScore(item),
-        qualityTier: item.qualityTier || 'opportunity'
-      }))
-      .filter((lead) => {
-        const isNotFound = lead.phone === "Não encontrado" || lead.phone === "Not Found";
-        const clean = cleanPhone(lead.phone);
-        return !isNotFound && clean !== null;
-      });
-
-    return { leads, sources };
-
-  } catch (error) {
-    console.error("Erro na busca Gemini:", error);
-    return { leads: [], sources: [] }; 
+            // Adiciona os válidos à lista principal
+            allLeads = [...allLeads, ...validLeadsInBatch];
+            
+            // Atualiza a lista negra para a próxima iteração
+            validLeadsInBatch.forEach(l => currentSessionNames.push(l.name));
+            
+            // Se já temos o suficiente, paramos o loop
+            if (allLeads.length >= targetCount) break;
+        }
+    
+      } catch (error) {
+        console.error(`Erro na tentativa ${attempts}:`, error);
+        // Continua para a próxima tentativa se der erro
+      }
   }
+
+  // Retorna o que conseguimos (mesmo se for um pouco menos ou mais que o target)
+  // Limitamos ao targetCount para não poluir a tela se vier demais
+  return { leads: allLeads.slice(0, targetCount), sources: allSources };
 };
 
 export const generateTacticalPrompts = async (serviceContext: ServiceContext): Promise<string[]> => {
-    // Fallback inteligente se não houver serviço configurado
     if (!serviceContext.serviceName) return [
         "Apenas empresas com avaliação menor que 4.0 no Google Maps",
         "Negócios locais que não possuem site oficial nos resultados",
@@ -205,22 +221,12 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
     ];
 
     const prompt = `
-        ATUE COMO UM ESPECIALISTA EM GOOGLE DORKING E PESQUISA AVANÇADA.
-        
-        SERVIÇO DO USUÁRIO: "${serviceContext.serviceName}"
+        ATUE COMO UM ESPECIALISTA EM PESQUISA DE MERCADO.
+        SERVIÇO: "${serviceContext.serviceName}"
         DESCRIÇÃO: "${serviceContext.description}"
         
-        MISSÃO: Crie 3 instruções de "Mira Laser" (Filtros de Busca) para encontrar o cliente PERFEITO que tem a dor que esse serviço resolve.
-        
-        REGRAS:
-        1. As ideias devem ser ordens diretas para a IA de busca.
-        2. Foco em "Problemas Visíveis" (Ex: Sem site, reviews ruins, site lento).
-        3. ORDENE PELA MELHOR E MAIS LUCRATIVA IDEIA PRIMEIRO.
-        
-        SAÍDA ESPERADA (JSON ARRAY DE STRINGS):
-        ["Apenas clínicas de estética que não têm site e usam Linktree", "Empresas de engenharia com sites que não abrem no celular", "Advogados com menos de 10 avaliações no Google"]
-        
-        IDIOMA: PORTUGUÊS DO BRASIL.
+        Gere 3 instruções de busca (filtros) para encontrar clientes ideais.
+        SAÍDA JSON ARRAY: ["Ideia 1", "Ideia 2", "Ideia 3"]
     `;
 
     try {
@@ -234,7 +240,6 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
         });
         
         const text = response.text || "[]";
-        // Usa o extrator robusto para evitar quebras
         const json = extractJson(text);
         
         return Array.isArray(json) ? json : [
@@ -322,10 +327,6 @@ export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceConte
     }
 }
 
-/**
- * CONSULTORIA ESTRATÉGICA (LOGIC-LOCK V2: COERÊNCIA TOTAL)
- * Agora, a função é estritamente lógica e não usa aleatoriedade para evitar alucinações.
- */
 export const generateServiceInsights = async (serviceName: string, description: string, targetAudience: string = ""): Promise<ServiceInsights> => {
   const audienceInstruction = targetAudience 
       ? `O usuário definiu EXPLICITAMENTE o público alvo: "${targetAudience}". Você é OBRIGADO a sugerir uma estratégia DENTRO deste público (ex: um sub-nicho premium de ${targetAudience}). É PROIBIDO SUGERIR OUTRO SETOR.`
@@ -363,20 +364,18 @@ export const generateServiceInsights = async (serviceName: string, description: 
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.5 // Baixa temperatura para garantir lógica e consistência, sem "viagens"
+        temperature: 0.5 
       }
     });
     
     const text = response.text || "";
     const json = extractJson(text);
     
-    // Validação de segurança para garantir que o fallback não seja estático
     if (!json || !json.recommendedNiche) throw new Error("Falha na geração");
 
     return json;
 
   } catch (error) {
-    // Fallback Dinâmico (Usa os dados do usuário para não parecer quebrado)
     return {
       recommendedNiche: targetAudience || "Empresas de Alto Padrão",
       suggestedTicket: 2000,
@@ -386,11 +385,7 @@ export const generateServiceInsights = async (serviceName: string, description: 
   }
 };
 
-/**
- * OFERTA IRRESISTÍVEL (AGORA COM VARIAÇÃO DE FRAMEWORKS PODEROSOS E PERSONALIZAÇÃO DE NOME)
- */
 export const generateKillerDifferential = async (serviceName: string, description: string, targetAudience: string = "Clientes"): Promise<string> => {
-    // ROLETA DE FRAMEWORKS DE COPYWRITING DE ELITE
     const frameworks = [
         "GARANTIA DE RISCO REVERSO (Eu assumo o risco financeiro)",
         "MECANISMO ÚNICO (Nome proprietário científico + Método novo)",
@@ -435,7 +430,6 @@ export const generateKillerDifferential = async (serviceName: string, descriptio
         if (!text || text.length < 10) throw new Error("Resposta curta demais");
         return text;
     } catch (e) {
-        // Fallback dinâmico em vez de estático
         const audience = targetAudience || "seus clientes";
         const service = serviceName || "serviço";
         return `Implemento o Método ${service.split(' ')[0]}-Turbo para ${audience}. Se não dobrar seus resultados em 30 dias, eu devolvo 100% do investimento e pago R$ 200 do meu bolso.`;

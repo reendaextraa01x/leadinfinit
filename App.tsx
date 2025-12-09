@@ -75,7 +75,7 @@ const App: React.FC = () => {
   const startProgressSimulation = (estimatedSeconds: number) => {
     setProgress(0);
     const totalMs = estimatedSeconds * 1000;
-    const intervalTime = 100;
+    const intervalTime = 200; // Update slightly slower for smoother long loads
     const steps = totalMs / intervalTime;
     const increment = 95 / steps; // Vai até 95% e espera
 
@@ -106,8 +106,8 @@ const App: React.FC = () => {
         });
     }
 
-    // Estimativa visual (Apenas para UX, a API retorna quando estiver pronta)
-    const estimatedSeconds = (count * 2) + 1; 
+    // Estimativa visual melhorada: A API agora faz loop para garantir qualidade, então aumentamos a estimativa
+    const estimatedSeconds = Math.ceil((count * 3.5) + 5); 
     startProgressSimulation(estimatedSeconds);
 
     if (!append) {
