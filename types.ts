@@ -1,4 +1,6 @@
 
+declare var process: any;
+
 export interface Lead {
   id: string;
   name: string;
