@@ -29,8 +29,8 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
     
     setIsAnalyzing(true);
     try {
-        // Chama a IA (que agora tem aleatoriedade interna)
-        const insights = await generateServiceInsights(context.serviceName, context.description);
+        // Chama a IA com o contexto completo (Público Alvo + Descrição)
+        const insights = await generateServiceInsights(context.serviceName, context.description, context.targetAudience || "");
         const updatedContext = { ...context, insights };
         setContext(updatedContext);
         onSave(updatedContext);

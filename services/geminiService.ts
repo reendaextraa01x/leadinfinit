@@ -63,6 +63,7 @@ export const generateLeads = async (
     >>> MODO CAÇADOR ATIVADO: FILTRO DE ALTA QUALIDADE <<<
     O USUÁRIO VENDE: "${serviceContext.serviceName}"
     DESCRIÇÃO DA OFERTA: "${serviceContext.description}"
+    PÚBLICO ALVO: "${serviceContext.targetAudience || 'Geral'}"
     
     SUA MISSÃO: Usar o Google Search para encontrar empresas reais com UMA DOR ESPECÍFICA que este serviço resolve.
     Exemplos do que buscar:
@@ -324,7 +325,7 @@ export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceConte
 /**
  * CONSULTORIA ESTRATÉGICA (AGORA COM VARIAÇÃO DE ARQUÉTIPOS)
  */
-export const generateServiceInsights = async (serviceName: string, description: string): Promise<ServiceInsights> => {
+export const generateServiceInsights = async (serviceName: string, description: string, targetAudience: string = ""): Promise<ServiceInsights> => {
   // ROLETA DE ESTRATÉGIAS
   const archetypes = [
     { name: "O CAÇADOR DE BALEIAS", focus: "Foque exclusivamente em clientes High-Ticket (Ricos) que pagam caro por exclusividade." },
@@ -334,30 +335,36 @@ export const generateServiceInsights = async (serviceName: string, description: 
   ];
   
   const selectedArchetype = archetypes[Math.floor(Math.random() * archetypes.length)];
+  const audienceInstruction = targetAudience 
+      ? `IMPORTANTE: O usuário JÁ definiu o público alvo como "${targetAudience}". Sua estratégia DEVE ser focada em otimizar para ESTE público (ex: sugerir um sub-nicho dentro de ${targetAudience}). NÃO sugira um público totalmente diferente.`
+      : "O usuário não definiu público. Sinta-se livre para sugerir o melhor nicho possível.";
 
   const prompt = `
-    ATUE COMO UM CONSULTOR DE NEGÓCIOS DE ELITE.
+    ATUE COMO UM ESTRATEGISTA DE MERCADO SÊNIOR.
     
-    O USUÁRIO VENDE: "${serviceName}"
-    DESCRIÇÃO: "${description}"
+    DADOS DO PROJETO:
+    - SERVIÇO: "${serviceName}"
+    - OFERTA/DIFERENCIAL: "${description}"
+    - PÚBLICO ALVO ATUAL: "${targetAudience}"
 
     SEU ARQUÉTIPO HOJE: ${selectedArchetype.name}.
     SUA LENTE DE ANÁLISE: ${selectedArchetype.focus}.
 
-    TAREFA: Baseado APENAS nesse arquétipo, defina uma estratégia ÚNICA.
-    NÃO SEJA GENÉRICO. NÃO DIGA "Pequenas Empresas". DIGA "Clínicas de Fertilidade" ou "Indústria Têxtil".
-    
-    1. MELHOR NICHO: Seja ultra-específico.
-    2. TICKET SUGERIDO: Um valor alto e ousado em R$.
-    3. POR QUE: A lógica psicológica por trás dessa escolha.
-    4. POTENCIAL: O tamanho da oportunidade em dinheiro.
+    ${audienceInstruction}
 
-    Formato JSON:
+    TAREFA: Baseado no seu arquétipo e nos dados acima, crie uma estratégia de entrada no mercado.
+    
+    REGRAS ANTI-GENÉRICAS:
+    1. PROIBIDO sugerir "Pequenas Empresas" ou "Comércio Local". Isso é preguiçoso.
+    2. SEJA ESPECÍFICO: Diga "Clínicas de Fertilidade" em vez de "Médicos". Diga "Advogados Tributaristas" em vez de "Advogados".
+    3. Conecte a OFERTA ("${description.substring(0, 50)}...") com a DOR do nicho sugerido.
+    
+    SAÍDA JSON:
     {
-      "recommendedNiche": "Nome do Nicho Específico",
+      "recommendedNiche": "Nome do Nicho (Ultra-Específico)",
       "suggestedTicket": 0000,
-      "reasoning": "Texto persuasivo explicando a escolha...",
-      "potential": "Texto sobre o mercado..."
+      "reasoning": "Explicação estratégica de POR QUE este nicho precisa desesperadamente do serviço descrito.",
+      "potential": "Análise de tamanho de mercado e urgência."
     }
   `;
 
@@ -367,21 +374,21 @@ export const generateServiceInsights = async (serviceName: string, description: 
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.9 // Alta temperatura para garantir variedade a cada clique
+        temperature: 0.95 
       }
     });
     
     const text = response.text || "";
     const json = extractJson(text);
     return json || {
-        recommendedNiche: "Nicho Específico (Erro na IA)",
+        recommendedNiche: targetAudience || "Nicho Específico (Erro na IA)",
         suggestedTicket: 2000,
-        reasoning: "Tente gerar novamente para uma nova estratégia.",
-        potential: "Alta demanda."
+        reasoning: "A IA falhou em processar a estratégia específica. Tente regenerar.",
+        potential: "Alta demanda latente."
     };
   } catch (error) {
     return {
-      recommendedNiche: "Consultórios Médicos Particulares",
+      recommendedNiche: targetAudience || "Consultórios Médicos Particulares",
       suggestedTicket: 2500,
       reasoning: "Público com alta margem de lucro que perde pacientes por falta de agendamento online.",
       potential: "Mercado de saúde privada movimenta bilhões."
