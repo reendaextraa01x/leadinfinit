@@ -1,15 +1,17 @@
 
+
 import React, { useState, useRef, useEffect } from 'react';
 import SearchInterface from './components/SearchInterface';
 import LeadCard from './components/LeadCard';
 import BatchSender from './components/BatchSender';
 import ServiceConfig from './components/ServiceConfig';
 import Dashboard from './components/Dashboard';
+import SalesLab from './components/SalesLab';
 import { generateLeads } from './services/geminiService';
 import { Lead, GroundingSource, BusinessSize, ServiceContext, SearchHistoryItem } from './types';
-import { DownloadIcon, SearchIcon, WhatsAppIcon, SettingsIcon, HomeIcon } from './components/ui/Icons';
+import { DownloadIcon, SearchIcon, WhatsAppIcon, SettingsIcon, HomeIcon, BrainIcon } from './components/ui/Icons';
 
-type Tab = 'dashboard' | 'search' | 'saved' | 'config';
+type Tab = 'dashboard' | 'search' | 'saved' | 'config' | 'lab';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('search');
@@ -38,7 +40,6 @@ const App: React.FC = () => {
 
   // --- LOCAL STORAGE PERSISTENCE ---
   useEffect(() => {
-    // Load from LocalStorage on Mount
     try {
         const storedSavedLeads = localStorage.getItem('leadinfinit_saved');
         const storedContext = localStorage.getItem('leadinfinit_context');
@@ -50,12 +51,11 @@ const App: React.FC = () => {
         if (storedHistory) setSearchHistory(JSON.parse(storedHistory));
         if (storedCount) setTotalGeneratedCount(parseInt(storedCount));
     } catch (e) {
-        console.error("Failed to load local storage", e);
+        console.error("Falha ao carregar storage", e);
     }
   }, []);
 
   useEffect(() => {
-    // Save to LocalStorage on Change
     localStorage.setItem('leadinfinit_saved', JSON.stringify(savedLeads));
   }, [savedLeads]);
 
@@ -77,13 +77,13 @@ const App: React.FC = () => {
     const totalMs = estimatedSeconds * 1000;
     const intervalTime = 100;
     const steps = totalMs / intervalTime;
-    const increment = 90 / steps; // Target 90% by the end of estimate
+    const increment = 95 / steps; // Vai até 95% e espera
 
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
 
     progressIntervalRef.current = window.setInterval(() => {
       setProgress((prev) => {
-        if (prev >= 90) return 90; // Stall at 90% until done
+        if (prev >= 95) return 95; // Trava em 95% até terminar de verdade
         return prev + increment;
       });
     }, intervalTime);
@@ -98,18 +98,16 @@ const App: React.FC = () => {
     setIsSearching(true);
     setError(null);
     
-    // Update History (only if new search)
     if (!append) {
         const newHistoryItem: SearchHistoryItem = { niche, location, size, timestamp: Date.now() };
         setSearchHistory(prev => {
-            // Remove duplicates and keep top 10
             const filtered = prev.filter(item => !(item.niche === niche && item.location === location && item.size === size));
             return [newHistoryItem, ...filtered].slice(0, 10);
         });
     }
 
-    // Estimate roughly 2.5s per lead + some overhead.
-    const estimatedSeconds = (count * 2.5) + 2; 
+    // Estimativa visual (Apenas para UX, a API retorna quando estiver pronta)
+    const estimatedSeconds = (count * 2) + 1; 
     startProgressSimulation(estimatedSeconds);
 
     if (!append) {
@@ -119,11 +117,14 @@ const App: React.FC = () => {
     setSearchParams({ niche, location, size, count });
 
     try {
-      // Pass existing names to prevent duplicates in the AI prompt
       const existingNames = append ? leads.map(l => l.name) : [];
       
+      // Chamada à API
       const { leads: newLeads, sources: newSources } = await generateLeads(niche, location, size, count, existingNames, serviceContext);
       
+      // Assim que a API responde, finalizamos a barra imediatamente
+      stopProgressSimulation();
+
       if (newLeads.length === 0 && !append) {
         setError("A IA não encontrou contatos válidos com telefone para este nicho. Tente outro termo ou local.");
       } else {
@@ -132,21 +133,17 @@ const App: React.FC = () => {
         setTotalGeneratedCount(prev => prev + newLeads.length);
         
         if (!append && resultsRef.current) {
-          setTimeout(() => {
-            resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }, 100);
+          // Scroll imediato
+          resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
       }
 
     } catch (err: any) {
       console.error(err);
       setError("Falha ao buscar leads. A internet é vasta, mas às vezes difícil de navegar. Tente novamente.");
-    } finally {
       stopProgressSimulation();
-      // Small delay to let user see 100% before resetting button state
-      setTimeout(() => {
-        setIsSearching(false);
-      }, 500);
+    } finally {
+      setIsSearching(false);
     }
   };
 
@@ -162,7 +159,6 @@ const App: React.FC = () => {
       if (exists) {
         return prev.filter(l => l.id !== lead.id);
       } else {
-        // Ensure status and score are set when saving if they aren't already
         const leadToSave = { 
             ...lead, 
             status: lead.status || 'new',
@@ -267,6 +263,17 @@ const App: React.FC = () => {
                   {savedLeads.length}
                 </span>
               )}
+            </button>
+             <button
+              onClick={() => setActiveTab('lab')}
+              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                activeTab === 'lab' 
+                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25' 
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <BrainIcon className="w-4 h-4 mr-2" />
+              Laboratório
             </button>
             <button
               onClick={() => setActiveTab('config')}
@@ -407,6 +414,10 @@ const App: React.FC = () => {
               onClear={() => setSavedLeads([])}
               onUpdateLead={updateLeadInSaved}
             />
+          )}
+
+          {activeTab === 'lab' && (
+            <SalesLab serviceContext={serviceContext} />
           )}
 
           {activeTab === 'config' && (

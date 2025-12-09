@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { ServiceContext, ServiceInsights } from '../types';
-import { SettingsIcon, SaveIcon, MoneyIcon, MagicIcon, ChartIcon, TargetIcon } from './ui/Icons';
-import { generateServiceInsights } from '../services/geminiService';
+import { SettingsIcon, SaveIcon, MoneyIcon, MagicIcon, ChartIcon, TargetIcon, LightningIcon } from './ui/Icons';
+import { generateServiceInsights, generateKillerDifferential } from '../services/geminiService';
 
 interface ServiceConfigProps {
   initialContext: ServiceContext;
@@ -13,6 +13,7 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
   const [context, setContext] = useState<ServiceContext>(initialContext);
   const [isSaved, setIsSaved] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isGeneratingOffer, setIsGeneratingOffer] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,6 +51,32 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
             ticketValue: prev.insights!.suggestedTicket
         }));
     }
+  };
+
+  const handleCreateKillerOffer = async () => {
+      if (!context.serviceName) {
+          alert("Por favor, preencha o Nome do Serviço primeiro.");
+          return;
+      }
+      
+      setIsGeneratingOffer(true);
+      try {
+          const killerOffer = await generateKillerDifferential(context.serviceName, context.description);
+          
+          // Typewriter effect simulation
+          setContext(prev => ({ ...prev, description: "" }));
+          let i = 0;
+          const interval = setInterval(() => {
+              setContext(prev => ({ ...prev, description: killerOffer.slice(0, i) }));
+              i++;
+              if (i > killerOffer.length) clearInterval(interval);
+          }, 20); // speed of typing
+
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setIsGeneratingOffer(false);
+      }
   };
 
   return (
@@ -123,14 +150,26 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 ml-1">
-              Descrição da Oferta / Diferencial
-            </label>
+            <div className="flex justify-between items-center mb-2">
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider ml-1">
+                Descrição da Oferta / Diferencial
+                </label>
+                <button
+                    type="button"
+                    onClick={handleCreateKillerOffer}
+                    disabled={isGeneratingOffer}
+                    className="flex items-center space-x-1 text-[10px] font-bold bg-purple-600/20 text-purple-300 hover:bg-purple-600 hover:text-white px-2 py-1 rounded border border-purple-500/30 transition-all animate-pulse-fast"
+                >
+                    <LightningIcon className="w-3 h-3" />
+                    <span>{isGeneratingOffer ? "Criando Mágica..." : "Criar Oferta Irresistível"}</span>
+                </button>
+            </div>
+            
             <textarea
               value={context.description}
               onChange={(e) => setContext({ ...context, description: e.target.value })}
-              placeholder="Ex: Crio sites profissionais otimizados para o Google que aumentam as vendas. Incluo hospedagem grátis no primeiro mês..."
-              className="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:border-accent transition-colors resize-none"
+              placeholder="Ex: Crio sites profissionais otimizados para o Google que aumentam as vendas..."
+              className="w-full h-32 bg-slate-900/50 border border-slate-700 rounded-lg p-3 text-white placeholder-slate-600 focus:outline-none focus:border-accent transition-colors resize-none font-sans leading-relaxed"
               required
             />
           </div>

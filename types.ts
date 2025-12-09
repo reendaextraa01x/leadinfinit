@@ -18,9 +18,11 @@ export interface Lead {
   audit?: string;     // AI Generated Technical Audit
   painPoints?: string[]; // Specific problems detected (e.g., "No Website", "Bad Reviews")
   matchReason?: string;  // Why this lead is a perfect fit for the user's service
+  qualityTier?: 'opportunity' | 'high-ticket' | 'urgent'; // Quality filter tag
 }
 
 export type BusinessSize = 'small' | 'medium' | 'large';
+export type LeadQualityFilter = 'opportunity' | 'high-ticket' | 'urgent';
 
 export interface SearchState {
   isSearching: boolean;
@@ -53,4 +55,24 @@ export interface SearchHistoryItem {
   location: string;
   size: BusinessSize;
   timestamp: number;
+}
+
+export type ObjectionType = 'expensive' | 'partner' | 'send_info' | 'has_agency' | 'later';
+
+// SALES LAB TYPES
+export interface SequenceDay {
+  day: string;
+  trigger: string;
+  subject?: string;
+  message: string;
+  explanation: string;
+}
+
+export type RoleplayProfile = 'skeptic' | 'cheap' | 'hasty';
+
+export interface RoleplayMessage {
+  sender: 'user' | 'ai';
+  text: string;
+  feedback?: string; // AI Coach feedback on user's move
+  score?: number;    // 0-10 score of the user's response
 }

@@ -1,22 +1,16 @@
-
-
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights } from "../types";
+import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights, ObjectionType, SequenceDay, RoleplayProfile, RoleplayMessage } from "../types";
 
-// @ts-ignore: O Vite substitui process.env.API_KEY no build, mas o TSC reclama. Ignoramos o erro.
-const apiKey = process.env.API_KEY;
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const ai = new GoogleGenAI({ apiKey: apiKey || "" });
-
-// Helper to clean JSON string from Markdown code blocks
+// Helper para limpar JSON de blocos Markdown
 const extractJson = (text: string): any => {
   try {
-    // Remove markdown code block syntax if present
     const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```([\s\S]*?)```/);
     const jsonString = jsonMatch ? jsonMatch[1] : text;
     return JSON.parse(jsonString);
   } catch (e) {
-    console.error("Failed to parse JSON from model output:", text);
+    console.error("Falha ao processar JSON da IA:", text);
     return null;
   }
 };
@@ -24,17 +18,17 @@ const extractJson = (text: string): any => {
 const cleanPhone = (phone: string): string | null => {
   if (!phone) return null;
   const cleaned = phone.replace(/\D/g, '');
-  if (cleaned.length < 8) return null; // Too short to be valid
+  if (cleaned.length < 8) return null;
   return cleaned;
 };
 
-// Calculate 'Lead Temperature'
+// Calcula Temperatura do Lead
 const calculateLeadScore = (lead: any): LeadScore => {
-    // Logic: No website or Broken Website = HOT Opportunity for web services
-    if (!lead.website || lead.website === "Not Found" || lead.website === "") {
+    // Lógica: Sem site ou Site Quebrado = Oportunidade QUENTE (Dinheiro na mesa)
+    if (!lead.website || lead.website === "Não encontrado" || lead.website === "" || lead.website === "Sem Site") {
         return 'hot';
     }
-    // Has website but also has Instagram (Means they are trying but might need optimization)
+    // Tem site mas tem Instagram (Tentando, mas pode melhorar)
     if (lead.instagram) {
         return 'warm';
     }
@@ -50,61 +44,64 @@ export const generateLeads = async (
   serviceContext?: ServiceContext
 ): Promise<{ leads: Lead[], sources: GroundingSource[] }> => {
   
-  // Construct a Context-Aware Prompt for "Hunter Mode"
+  // Prompt Otimizado para Velocidade e Contexto (HUNTER MODE)
   let serviceStrategy = "";
   if (serviceContext && serviceContext.serviceName) {
     serviceStrategy = `
-    >>> HUNTER MODE ACTIVATED: HIGH QUALITY FILTERING <<<
-    THE USER SELLS: "${serviceContext.serviceName}"
-    OFFER DESCRIPTION: "${serviceContext.description}"
+    >>> MODO CAÇADOR ATIVADO: FILTRO DE ALTA QUALIDADE <<<
+    O USUÁRIO VENDE: "${serviceContext.serviceName}"
+    DESCRIÇÃO DA OFERTA: "${serviceContext.description}"
     
-    YOUR MISSION: Find businesses that have a SPECIFIC PAIN POINT that this service solves.
-    Examples of what to look for based on user service:
-    - If user sells SITES -> Find businesses with NO website, BROKEN websites, or UGLY/OLD websites.
-    - If user sells ADS/TRAFFIC -> Find businesses with low social engagement or who are invisible on Google.
-    - If user sells SOCIAL MEDIA -> Find businesses with inactive Instagrams or bad photos.
+    SUA MISSÃO: Encontrar empresas com UMA DOR ESPECÍFICA que este serviço resolve.
+    Exemplos do que buscar:
+    - Se vende SITES -> Busque empresas SEM SITE, com sites QUEBRADOS ou FEIOS/ANTIGOS.
+    - Se vende TRÁFEGO -> Busque empresas invisíveis no Google ou com pouco engajamento.
+    - Se vende REDES SOCIAIS -> Busque empresas com Instagram abandonado ou fotos ruins.
     
-    Do NOT just list random businesses. List businesses that are "Easy Wins" for this service provider.
+    NÃO liste empresas aleatórias. Liste empresas que são "Vendas Fáceis" (Easy Wins).
     `;
   } else {
     serviceStrategy = `
-    >>> HUNTER MODE ACTIVATED <<<
-    Find businesses that look like they need Digital Modernization (No website, old branding, low reviews).
+    >>> MODO CAÇADOR ATIVADO <<<
+    Encontre empresas que pareçam precisar de Modernização Digital (Sem site, marca antiga, poucas avaliações).
     `;
   }
 
-  // Request slightly more than needed to account for filtering
+  // Pede um pouco mais para compensar o filtro de telefone
   const requestCount = Math.ceil(count * 1.5);
 
   const prompt = `
-    ACT AS AN ELITE SALES INTELLIGENCE BOT.
+    ATUE COMO UM SISTEMA DE INTELIGÊNCIA DE VENDAS DE ELITE (Focado no Brasil).
     
-    TARGET:
-    - Niche: "${niche}"
-    - Location: "${location}"
-    - Size: ${size} (Small = Local/Freelancer, Medium = Established, Large = Market Leader)
+    ALVO:
+    - Nicho: "${niche}"
+    - Localização: "${location}"
+    - Porte: ${size} (Pequeno=Local/Iniciante, Médio=Estabelecido, Grande=Líder de Mercado/Famoso)
     
     ${serviceStrategy}
     
-    REQUIREMENTS:
-    1. FIND ${requestCount} POTENTIAL LEADS.
-    2. *** STRICT TELEPHONE RULE ***: You MUST find a valid phone number (Mobile/WhatsApp preferred). If no phone, DO NOT include.
-    3. EXCLUDE these existing names: ${existingNames.join(", ")}.
+    REQUISITOS OBRIGATÓRIOS:
+    1. ENCONTRE ${requestCount} LEADS POTENCIAIS.
+    2. *** REGRA DO TELEFONE ***: Você DEVE encontrar um número válido (Preferência Celular/WhatsApp). Se não tiver telefone, NÃO INCLUA.
+    3. EXCLUA estes nomes já existentes: ${existingNames.join(", ")}.
+    4. IDIOMA: TODA A SAÍDA DEVE SER EM PORTUGUÊS DO BRASIL (PT-BR).
+       - Traduza "No Website" para "Sem Site".
+       - Traduza "Not Found" para "Não encontrado".
     
-    FOR EACH LEAD, YOU MUST IDENTIFY:
-    - "painPoints": An array of specific problems you detected (e.g., ["No Website", "Bad Reviews", "Inactive Instagram"]).
-    - "matchReason": A short persuasive sentence on why this lead is ALMOST IMPOSSIBLE NOT TO BUY. (e.g., "They have 5k followers but no link in bio - losing money daily.").
+    PARA CADA LEAD, IDENTIFIQUE:
+    - "painPoints": Lista de problemas detectados (Ex: ["Sem Site", "Avaliação Baixa", "Instagram Inativo"]). EM PORTUGUÊS.
+    - "matchReason": Uma frase curta e persuasiva do porquê esse lead vai comprar. (Ex: "Tem 5k seguidores mas sem link na bio - perdendo vendas."). EM PORTUGUÊS.
 
-    Output Format: STRICT JSON Array inside a code block.
+    Formato de Saída: APENAS ARRAY JSON dentro de um bloco de código.
     [
       {
-        "name": "Business Name",
+        "name": "Nome do Negócio",
         "phone": "(XX) 9XXXX-XXXX",
         "instagram": "https://instagram.com/...",
-        "website": "URL or 'Not Found'",
-        "description": "Short description of the business.",
-        "painPoints": ["No Website", "Low Google Rating"],
-        "matchReason": "Ideal target because they have high foot traffic but zero digital presence."
+        "website": "URL ou 'Sem Site'",
+        "description": "Breve descrição do negócio em PT-BR.",
+        "painPoints": ["Sem Site", "Nota Baixa no Google"],
+        "matchReason": "Alvo ideal pois tem muito fluxo mas presença digital zero."
       }
     ]
   `;
@@ -115,6 +112,7 @@ export const generateLeads = async (
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
+        temperature: 0.7, // Temperatura menor para resposta mais rápida e direta
       },
     });
 
@@ -130,92 +128,89 @@ export const generateLeads = async (
     }
 
     if (!Array.isArray(rawLeads)) {
-      throw new Error("AI did not return a valid array of leads.");
+      throw new Error("A IA não retornou uma lista válida.");
     }
 
-    // Map, Sanitize, and STRICT FILTER
+    // Mapeamento, Limpeza e FILTRO RIGOROSO
     const leads: Lead[] = rawLeads
       .map((item: any, index: number) => ({
         id: `${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`,
         name: item.name || "Desconhecido",
         phone: item.phone || "Não encontrado",
-        instagram: (item.instagram === "Not Found" || !item.instagram) ? null : item.instagram,
+        instagram: (item.instagram === "Not Found" || !item.instagram || item.instagram === "Não encontrado") ? null : item.instagram,
         description: item.description || "Sem descrição disponível.",
-        website: (item.website === "Not Found" || !item.website) ? undefined : item.website,
+        website: (item.website === "Not Found" || !item.website || item.website === "Sem Site" || item.website === "Não encontrado") ? undefined : item.website,
         painPoints: Array.isArray(item.painPoints) ? item.painPoints : [],
         matchReason: item.matchReason || "Oportunidade de modernização digital.",
         confidenceScore: 1,
         status: 'new' as LeadStatus,
-        score: calculateLeadScore(item) // Calculate Hot/Warm based on website status
+        score: calculateLeadScore(item)
       }))
-      // THE FILTER: Remove anything that doesn't have a valid phone number
+      // O FILTRO: Remove qualquer coisa sem telefone válido
       .filter((lead) => {
         const isNotFound = lead.phone === "Não encontrado" || lead.phone === "Not Found";
         const clean = cleanPhone(lead.phone);
-        // Must not be "Not Found" AND must have at least 8 digits
         return !isNotFound && clean !== null;
       });
 
     return { leads, sources };
 
   } catch (error) {
-    console.error("Gemini Search Error:", error);
+    console.error("Erro na busca Gemini:", error);
     throw error;
   }
 };
 
 /**
- * Generates a hyper-personalized message for a specific lead.
+ * Gera Copy de Marketing Hiper-Personalizada (PT-BR)
  */
 export const generateMarketingCopy = async (
   lead: Lead, 
   serviceContext: ServiceContext
 ): Promise<string> => {
   
-  // Fallback if no context
   if (!serviceContext.serviceName) {
     return `Olá ${lead.name}, tudo bem? Vi seu perfil e achei interessante o trabalho de vocês. Gostaria de conversar sobre uma oportunidade de parceria.`;
   }
 
-  // Choose a random strategy to ensure variations
+  // Estratégias (Traduzidas para contexto da IA)
   const strategies = [
-    "THE 'MYSTERY SHOPPER' (Pretend you tried to use their service but hit a snag)",
-    "THE 'LOST REVENUE' (Aggressively point out money they are losing)",
-    "THE 'COMPETITOR ENVY' (Mention their competitor is doing something better)",
-    "THE 'PATTERN INTERRUPT' (Start with a weird, hyper-specific question)",
-    "THE 'EGO BAIT' (Compliment them heavily, then pivot to the one missing piece)"
+    "O CLIENTE OCULTO (Finja que tentou comprar mas teve problema)",
+    "DINHEIRO PERDIDO (Aponte agressivamente onde estão perdendo vendas)",
+    "INVEJA DO CONCORRENTE (Mencione que o concorrente está fazendo melhor)",
+    "QUEBRA DE PADRÃO (Comece com uma pergunta estranha e específica)",
+    "ISCA DE EGO (Elogie muito, depois bata no único ponto fraco)"
   ];
   const selectedStrategy = strategies[Math.floor(Math.random() * strategies.length)];
 
-  // Inject specific pain points into the copy prompt if available
   const painPointsInfo = lead.painPoints && lead.painPoints.length > 0 
-    ? `Specific Problems Detected: ${lead.painPoints.join(", ")}`
-    : "Problem: General lack of digital optimization.";
+    ? `Problemas Específicos Detectados: ${lead.painPoints.join(", ")}`
+    : "Problema: Falta de otimização digital geral.";
 
   const prompt = `
-    You are a world-class Direct Response Copywriter known for "Cold DMs" that get 80% response rates.
-    You are aggressive, persuasive, and use psychological triggers.
+    ATUE COMO UM COPYWRITER DE RESPOSTA DIRETA DE ELITE (Focado em Cold DM/WhatsApp).
+    Você é agressivo, persuasivo e usa gatilhos mentais.
     
-    YOUR STRATEGY FOR THIS MESSAGE: ${selectedStrategy}
+    SUA ESTRATÉGIA PARA ESSA MENSAGEM: ${selectedStrategy}
 
-    The Client (Receiver):
-    - Name: ${lead.name}
-    - Details: "${lead.description}"
+    O Cliente (Recebedor):
+    - Nome: ${lead.name}
+    - Detalhes: "${lead.description}"
     - ${painPointsInfo}
-    - Match Reason: ${lead.matchReason || "N/A"}
+    - Motivo do Match: ${lead.matchReason || "N/A"}
     
-    My Service (Sender):
-    - Service: ${serviceContext.serviceName}
-    - Offer: ${serviceContext.description}
+    Meu Serviço (Remetente):
+    - Serviço: ${serviceContext.serviceName}
+    - Oferta: ${serviceContext.description}
     
-    Rules for the message:
-    1. Language: Portuguese (Brazil). Informal but sharp. Use slang like "Opa", "Fala [Nome]".
-    2. NO "Assunto:". Just the body text.
-    3. SHORT. Mobile optimized. Max 3-4 sentences broken up.
-    4. EXTREMELY PERSUASIVE. Focus on the PAIN POINTS detected.
-    5. If they have "No Website", use that as the main hook.
+    REGRAS DA MENSAGEM:
+    1. IDIOMA: PORTUGUÊS DO BRASIL. Informal, mas afiado. Use gírias como "Opa", "Fala [Nome]".
+    2. SEM "Assunto:". Apenas o texto do corpo.
+    3. CURTO. Otimizado para celular. Max 3-4 frases quebradas.
+    4. EXTREMAMENTE PERSUASIVO. Foque na DOR (PAIN POINT).
+    5. Se eles tiverem "Sem Site", use isso como gancho principal.
     
-    Output ONLY the message text.
+    SAÍDA APENAS O TEXTO DA MENSAGEM.
   `;
 
   try {
@@ -223,36 +218,41 @@ export const generateMarketingCopy = async (
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
-        temperature: 1.5, // High temperature for maximum creativity/variation
+        temperature: 1.5, // Alta criatividade
       }
     });
     return response.text?.trim() || "";
   } catch (error) {
-    console.error("Copy generation error", error);
     return `Fala ${lead.name}, vi aqui que vocês estão deixando dinheiro na mesa sem um site profissional. Bora resolver isso hoje?`;
   }
 };
 
 /**
- * Generates a Technical Audit (The Secret Weapon)
+ * Gera Auditoria Técnica (A Arma Secreta) - REALISMO EXTREMO PT-BR
  */
 export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceContext): Promise<string> => {
-    const painContext = lead.painPoints ? `Known Issues: ${lead.painPoints.join(", ")}` : "";
+    const painContext = lead.painPoints ? `Problemas Conhecidos: ${lead.painPoints.join(", ")}` : "";
     
     const prompt = `
-        ACT AS AN EXPERT AUDITOR FOR: ${serviceContext.serviceName || "Digital Marketing"}.
-        TARGET: ${lead.name} (${lead.description}).
+        ATUE COMO UM CONSULTOR DE NEGÓCIOS EXPERT (Sem alucinações técnicas).
+        ALVO: ${lead.name} (${lead.description}).
+        SERVIÇO VENDIDO: ${serviceContext.serviceName}
         ${painContext}
         
-        TASK: Create a mini "Technical Audit" finding 3 SPECIFIC PROBLEMS with their digital presence that justify buying the user's service.
+        TAREFA: Criar uma mini "Auditoria de Negócio" encontrando 3 PROBLEMAS VISÍVEIS baseados em dados públicos externos (Google Maps, Instagram, Site) que justifiquem a compra.
         
-        FORMAT:
-        1. ❌ [Problem 1]
-        2. ❌ [Problem 2]
-        3. ❌ [Problem 3]
+        REGRAS DE REALISMO:
+        1. NÃO INVENTE erros de servidor ou código que você não pode ver.
+        2. FOQUE EM: Poucas Avaliações (Prova Social), Falta de Site, Fotos Ruins, Sem Link na Bio, Reclamações Recentes.
+        3. TOM: Profissional mas "Duro na Queda" (Tough Love). 
+        4. IDIOMA: PORTUGUÊS DO BRASIL.
         
-        Language: Portuguese (Brazil). Professional, authoritative, but shocking.
-        Keep it concise. Max 3 bullet points.
+        FORMATO:
+        1. ❌ [Problema 1]
+        2. ❌ [Problema 2]
+        3. ❌ [Problema 3]
+        
+        Seja conciso. Max 3 bullet points.
     `;
 
     try {
@@ -262,35 +262,35 @@ export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceConte
         });
         return response.text?.trim() || "";
     } catch (e) {
-        return "1. ❌ Site não encontrado ou lento.\n2. ❌ Perfil do Google desatualizado.\n3. ❌ Ausência de funil de vendas.";
+        return "1. ❌ Site não encontrado ou link quebrado.\n2. ❌ Presença digital fraca comparada aos concorrentes.\n3. ❌ Ausência de chamada para ação clara.";
     }
 }
 
 /**
- * Generates Strategic Insights based on the user's service.
+ * Gera Insights Estratégicos (Consultoria)
  */
 export const generateServiceInsights = async (serviceName: string, description: string): Promise<ServiceInsights> => {
   const prompt = `
-    Act as a World-Class Business Strategist & Sales Consultant.
+    Atue como um Estrategista de Negócios e Consultor de Vendas de Classe Mundial.
     
-    The User sells the following service:
-    Name: "${serviceName}"
-    Description: "${description}"
+    O Usuário vende o seguinte serviço:
+    Nome: "${serviceName}"
+    Descrição: "${description}"
 
-    YOUR TASK:
-    Analyze this service and determine the absolute BEST market strategy for high-ticket sales.
+    SUA TAREFA:
+    Analise este serviço e determine a MELHOR estratégia de mercado para vendas High-Ticket no Brasil.
     
-    1. Identify the ONE best niche industry to target (e.g., "Dentistas de Alto Padrão", "Corretores de Imóveis de Luxo").
-    2. Estimate a recommended HIGH-TICKET price in BRL (R$) that this specific niche can afford.
-    3. Explain WHY this niche is the perfect fit (the pain point).
-    4. Describe the financial potential (Why is it lucrative?).
+    1. Identifique o MELHOR NICHO para atacar (Ex: "Dentistas de Alto Padrão", "Corretores de Luxo").
+    2. Estime um preço HIGH-TICKET recomendado em BRL (R$) que este nicho pode pagar.
+    3. Explique POR QUE este nicho é perfeito (a dor urgente).
+    4. Descreva o potencial financeiro.
 
-    Output format: JSON ONLY.
+    Formato de Saída: APENAS JSON.
     {
-      "recommendedNiche": "Industry Name",
+      "recommendedNiche": "Nome da Indústria",
       "suggestedTicket": 2500,
-      "reasoning": "Explanation of why this niche needs this service urgently...",
-      "potential": "Explanation of the market size and opportunity..."
+      "reasoning": "Explicação em PT-BR do porquê...",
+      "potential": "Explicação em PT-BR do tamanho da oportunidade..."
     }
   `;
 
@@ -306,13 +306,241 @@ export const generateServiceInsights = async (serviceName: string, description: 
     const text = response.text || "";
     return JSON.parse(text);
   } catch (error) {
-    console.error("Strategy Insight Error", error);
-    // Fallback
+    console.error("Erro Insights:", error);
     return {
       recommendedNiche: "Negócios Locais",
       suggestedTicket: 1500,
-      reasoning: "Todos os negócios precisam de presença digital.",
-      potential: "Alta demanda em todas as cidades."
+      reasoning: "Todos os negócios precisam de presença digital para sobreviver hoje.",
+      potential: "Alta demanda em todas as cidades brasileiras."
     };
   }
+};
+
+/**
+ * Gera Diferencial Matador / Oferta Grand Slam
+ */
+export const generateKillerDifferential = async (serviceName: string, currentDescription: string): Promise<string> => {
+    const prompt = `
+      ATUE COMO ALEX HORMOZI (Expert em Ofertas).
+      
+      SERVIÇO DE ENTRADA: "${serviceName}"
+      DESCRIÇÃO ATUAL: "${currentDescription}"
+      
+      TAREFA: Reescreva a descrição do serviço transformando-a em uma "OFERTA GRAND SLAM" (Alto Valor, Baixo Risco, Alta Urgência).
+      
+      FÓRMULA: 
+      1. Resultado dos Sonhos (O que eles querem de verdade, não a ferramenta).
+      2. Probabilidade de Sucesso (Prova social/Garantia).
+      3. Tempo (Resultados rápidos).
+      4. Esforço (Feito para você).
+      
+      REQUISITOS:
+      - DEVE incluir uma GARANTIA OUSADA (Reversão de Risco).
+      - DEVE soar Surpreendente e "Bom demais pra ser verdade" (mas real).
+      - IDIOMA: PORTUGUÊS DO BRASIL. Copy persuasiva.
+      
+      Exemplo Entrada: "Faço sites"
+      Exemplo Saída: "Eu crio uma Máquina de Vendas 24h para sua empresa. Entrego seu site pronto em 7 dias ou devolvo seu dinheiro + R$ 500 pelo atraso. Tudo incluso."
+      
+      SAÍDA APENAS O TEXTO DA NOVA OFERTA. SEM EXPLICAÇÕES.
+    `;
+    
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt
+        });
+        return response.text?.trim() || "";
+    } catch (e) {
+        return "Crio uma infraestrutura digital completa para seu negócio. Se não gerar resultado em 30 dias, eu devolvo seu investimento integralmente.";
+    }
+};
+
+/**
+ * QUEBRA DE OBJEÇÕES (AI Sales Coach)
+ */
+export const handleObjection = async (
+    leadName: string, 
+    objectionType: ObjectionType, 
+    serviceContext: ServiceContext
+): Promise<string> => {
+    const objectionContext = {
+        'expensive': "O cliente disse que 'está caro' ou 'não tem orçamento'.",
+        'partner': "O cliente disse que 'precisa ver com o sócio/esposa'.",
+        'send_info': "O cliente disse 'me manda um PDF/apresentação' (geralmente para dispensar).",
+        'has_agency': "O cliente disse que 'já tem quem faça isso'.",
+        'later': "O cliente disse 'agora não' ou 'vou pensar'."
+    }[objectionType];
+
+    const prompt = `
+        ATUE COMO UM TREINADOR DE VENDAS DE ELITE (Sandler System / Jordan Belfort).
+        
+        SITUAÇÃO:
+        Você está conversando no WhatsApp com ${leadName}.
+        Você ofereceu: ${serviceContext.serviceName}.
+        
+        OBJEÇÃO DO CLIENTE: ${objectionContext}
+        
+        TAREFA: Gere uma resposta CURTA (1-2 frases) para contornar essa objeção e manter a conversa viva.
+        NÃO seja defensivo. Use perguntas ou concorde para depois reverter.
+        
+        Exemplo para 'Caro': "Entendo perfeitamente, Carlos. Deixa eu te perguntar: comparado a quanto um cliente novo traz de lucro pra você, R$ 1.500 ainda parece caro se isso te trouxer 10 clientes?"
+        
+        IDIOMA: PORTUGUÊS DO BRASIL.
+        SAÍDA: APENAS A RESPOSTA SUGERIDA.
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt
+        });
+        return response.text?.trim() || "Entendo. Só pra eu entender melhor, o que exatamente te preocupa nesse momento?";
+    } catch (e) {
+        return "Entendo perfeitamente. O que te impede de dar esse passo agora?";
+    }
+};
+
+/**
+ * CALCULADORA DE CUSTO DA INAÇÃO (ROI/Medo)
+ */
+export const calculateInactionCost = async (
+    lead: Lead,
+    serviceContext: ServiceContext
+): Promise<string> => {
+    const prompt = `
+        ATUE COMO UM ANALISTA FINANCEIRO AGRESSIVO.
+        
+        CLIENTE: ${lead.name} (${lead.description})
+        PROBLEMA DETECTADO: ${lead.painPoints?.join(", ") || "Falta de presença digital eficiente"}
+        SOLUÇÃO OFERECIDA: ${serviceContext.serviceName}
+        
+        TAREFA: Crie um "Cálculo de Prejuízo Estimado" para enviar ao cliente.
+        Mostre, com números fictícios mas realistas para o nicho, quanto dinheiro ele está perdendo POR MÊS ao não resolver o problema.
+        
+        Exemplo: "Dr. João, sem um site captando pacientes no Google, o senhor perde em média 5 pacientes de R$ 300 por semana. Isso são R$ 6.000/mês jogados no lixo."
+        
+        REGRAS:
+        1. Seja específico e use valores em R$.
+        2. Curto e direto (formato de mensagem de WhatsApp).
+        3. Gere medo da perda (Loss Aversion).
+        4. IDIOMA: PORTUGUÊS DO BRASIL.
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt
+        });
+        return response.text?.trim() || "";
+    } catch (e) {
+        return "Sem essa solução implementada, estima-se que você esteja perdendo cerca de 20% do faturamento potencial todos os meses para concorrentes mais digitalizados.";
+    }
+};
+
+/**
+ * SALES LAB: GERADOR DE CADÊNCIA NEURAL (5 dias)
+ */
+export const generateNeuroSequence = async (serviceContext: ServiceContext): Promise<SequenceDay[]> => {
+    if (!serviceContext.serviceName) throw new Error("Configure seu serviço primeiro.");
+
+    const prompt = `
+      ATUE COMO UM ESPECIALISTA EM NEUROVENDAS.
+      
+      CONTEXTO:
+      Eu vendo: "${serviceContext.serviceName}"
+      Minha oferta: "${serviceContext.description}"
+      
+      TAREFA: Crie uma "SEQUÊNCIA DE RESGATE" de 5 mensagens para leads que pararam de responder (Ghosting).
+      Use estes gatilhos obrigatórios:
+      1. Dia 1: Reciprocidade/Valor (Entregar algo útil/dica rápida).
+      2. Dia 3: Curiosidade (Uma pergunta intrigante).
+      3. Dia 7: Prova Social (Citar outros resultados sem se gabar).
+      4. Dia 15: Medo da Perda/Escassez (Falar que a agenda vai fechar).
+      5. Dia 30: "Break-up" (Despedida educada para gerar reação).
+      
+      FORMATO: JSON ARRAY.
+      [
+        { 
+          "day": "Dia 1", 
+          "trigger": "Reciprocidade",
+          "subject": "Ideia rápida pra você",
+          "message": "Texto da mensagem...",
+          "explanation": "Por que funciona..."
+        }
+      ]
+      
+      IDIOMA: PORTUGUÊS DO BRASIL. Texto de WhatsApp (curto, informal).
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: { responseMimeType: "application/json" }
+        });
+        
+        const text = response.text || "";
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("Erro Sequence:", e);
+        return [];
+    }
+};
+
+/**
+ * SALES LAB: ROLEPLAY DOJO
+ */
+export const runRoleplayTurn = async (
+    profile: RoleplayProfile, 
+    chatHistory: RoleplayMessage[], 
+    serviceContext: ServiceContext
+): Promise<RoleplayMessage> => {
+    
+    const profileDesc = {
+        'skeptic': "O Cético: Duvida de tudo, acha golpe, pede provas, é frio.",
+        'cheap': "O Pão-Duro: Só liga pro preço, chora desconto, diz que o sobrinho faz de graça.",
+        'hasty': "O Apressado: Não tem tempo, responde monossílabo, quer o preço direto, é grosso."
+    }[profile];
+
+    const historyText = chatHistory.map(m => `${m.sender.toUpperCase()}: ${m.text}`).join("\n");
+
+    const prompt = `
+      ATUE COMO DOIS PERSONAGENS:
+      1. O CLIENTE (${profileDesc}). Você está conversando com um vendedor que vende "${serviceContext.serviceName}".
+      2. O TREINADOR DE VENDAS (COACH).
+      
+      HISTÓRICO DA CONVERSA:
+      ${historyText}
+      
+      SUA MISSÃO AGORA:
+      Analise a última mensagem do USUÁRIO (Vendedor).
+      
+      SAÍDA ESPERADA (JSON):
+      {
+        "text": "Sua resposta como CLIENTE. Mantenha a personalidade difícil. Seja curto, como no WhatsApp.",
+        "feedback": "Seu feedback como COACH sobre a resposta do usuário. O que ele fez bem? O que errou? Como melhorar?",
+        "score": 0 a 10 (Nota para a resposta do usuário)
+      }
+      
+      IDIOMA: PORTUGUÊS DO BRASIL.
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: { responseMimeType: "application/json" }
+        });
+        
+        const data = JSON.parse(response.text || "{}");
+        return {
+            sender: 'ai',
+            text: data.text || "...",
+            feedback: data.feedback,
+            score: data.score
+        };
+    } catch (e) {
+        return { sender: 'ai', text: "Pode repetir? Não entendi.", feedback: "Erro na IA.", score: 0 };
+    }
 };

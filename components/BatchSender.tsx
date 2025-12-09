@@ -1,8 +1,9 @@
 
+
 import React, { useState } from 'react';
-import { Lead, ServiceContext, LeadStatus } from '../types';
-import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon } from './ui/Icons';
-import { generateMarketingCopy, generateLeadAudit } from '../services/geminiService';
+import { Lead, ServiceContext, LeadStatus, ObjectionType } from '../types';
+import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon } from './ui/Icons';
+import { generateMarketingCopy, generateLeadAudit, handleObjection, calculateInactionCost } from '../services/geminiService';
 
 interface BatchSenderProps {
   savedLeads: Lead[];
@@ -26,6 +27,9 @@ interface LeadWithStatus {
   message: string;
   isGeneratingMessage: boolean;
   isGeneratingAudit: boolean;
+  isHandlingObjection: boolean;
+  isCalculatingROI: boolean;
+  showTools: boolean; // Toggle for extra sales tools
 }
 
 const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, onRemove, onClear, onUpdateLead }) => {
@@ -48,7 +52,10 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
           id: lead.id,
           message: defaultMsg,
           isGeneratingMessage: false,
-          isGeneratingAudit: false
+          isGeneratingAudit: false,
+          isHandlingObjection: false,
+          isCalculatingROI: false,
+          showTools: false
         };
         hasChanges = true;
       }
@@ -103,6 +110,34 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
           setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingAudit: false }}));
       }
   };
+
+  const handleAiObjection = async (lead: Lead, type: ObjectionType) => {
+      setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isHandlingObjection: true }}));
+      try {
+          const rebuttal = await handleObjection(lead.name, type, serviceContext);
+          setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], message: rebuttal }}));
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isHandlingObjection: false }}));
+      }
+  };
+
+  const handleROICalculation = async (lead: Lead) => {
+      setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isCalculatingROI: true }}));
+      try {
+          const calculation = await calculateInactionCost(lead, serviceContext);
+          setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], message: calculation }}));
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isCalculatingROI: false }}));
+      }
+  };
+
+  const toggleTools = (id: string) => {
+      setLeadStates(prev => ({...prev, [id]: { ...prev[id], showTools: !prev[id].showTools }}));
+  }
 
   const moveStage = (lead: Lead, nextStage: LeadStatus) => {
       onUpdateLead({ ...lead, status: nextStage });
@@ -166,7 +201,7 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
                             const isHot = lead.score === 'hot';
 
                             return (
-                                <div key={lead.id} className="bg-surface border border-slate-800 rounded-lg p-4 shadow-sm hover:border-slate-600 transition-all group">
+                                <div key={lead.id} className="bg-surface border border-slate-800 rounded-lg p-4 shadow-sm hover:border-slate-600 transition-all group relative">
                                     {/* Lead Header */}
                                     <div className="flex justify-between items-start mb-2">
                                         <div>
@@ -183,7 +218,7 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
                                         </div>
                                     </div>
 
-                                    {/* Audit Section - The Secret Weapon */}
+                                    {/* Audit Section - The Secret Weapon (New Leads Only) */}
                                     {col.id === 'new' && (
                                         <div className="mb-3">
                                             {lead.audit ? (
@@ -203,21 +238,57 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
                                         </div>
                                     )}
 
+                                    {/* SALES TOOLS TOGGLE (Negotiation Phase) */}
+                                    {col.id !== 'new' && col.id !== 'closed' && (
+                                        <div className="mb-2">
+                                            <button 
+                                                onClick={() => toggleTools(lead.id)}
+                                                className="w-full py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-400 flex items-center justify-center gap-1 rounded border border-slate-700"
+                                            >
+                                                <ShieldIcon className="w-3 h-3" />
+                                                {state.showTools ? 'Ocultar Ferramentas de Venda' : 'Abrir Kit de Fechamento'}
+                                            </button>
+
+                                            {state.showTools && (
+                                                <div className="mt-2 p-2 bg-slate-900 rounded border border-slate-800 animate-fade-in">
+                                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-2">Quebrador de Objeções (IA)</p>
+                                                    <div className="grid grid-cols-2 gap-1 mb-3">
+                                                        <button disabled={state.isHandlingObjection} onClick={() => handleAiObjection(lead, 'expensive')} className="p-1 bg-slate-800 hover:bg-slate-700 text-[10px] rounded border border-slate-700">💸 "Tá Caro"</button>
+                                                        <button disabled={state.isHandlingObjection} onClick={() => handleAiObjection(lead, 'partner')} className="p-1 bg-slate-800 hover:bg-slate-700 text-[10px] rounded border border-slate-700">🤝 "Ver com Sócio"</button>
+                                                        <button disabled={state.isHandlingObjection} onClick={() => handleAiObjection(lead, 'has_agency')} className="p-1 bg-slate-800 hover:bg-slate-700 text-[10px] rounded border border-slate-700">🏢 "Já tenho Agência"</button>
+                                                        <button disabled={state.isHandlingObjection} onClick={() => handleAiObjection(lead, 'send_info')} className="p-1 bg-slate-800 hover:bg-slate-700 text-[10px] rounded border border-slate-700">📄 "Manda PDF"</button>
+                                                    </div>
+                                                    
+                                                    <p className="text-[10px] text-slate-500 uppercase font-bold mb-2 mt-2">Calculadora de Medo</p>
+                                                    <button 
+                                                        disabled={state.isCalculatingROI}
+                                                        onClick={() => handleROICalculation(lead)}
+                                                        className="w-full py-1 bg-red-900/20 hover:bg-red-900/40 text-red-300 text-[10px] rounded border border-red-900/30 flex items-center justify-center gap-1"
+                                                    >
+                                                        <CalculatorIcon className="w-3 h-3" />
+                                                        Gerar Cálculo de Prejuízo (ROI)
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
                                     {/* Message Area */}
                                     <textarea 
                                         value={state.message}
                                         onChange={(e) => setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], message: e.target.value }}))}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-300 resize-none h-20 mb-2 focus:border-accent focus:outline-none"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-300 resize-none h-24 mb-2 focus:border-accent focus:outline-none font-sans leading-relaxed"
+                                        placeholder="Escreva sua mensagem aqui..."
                                     />
 
                                     {/* Actions */}
                                     <div className="flex gap-2">
                                         <button 
                                             onClick={() => handleSend(lead, state.message)}
-                                            className="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 rounded flex items-center justify-center shadow-lg"
+                                            className="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2 rounded flex items-center justify-center shadow-lg transition-transform active:scale-95"
                                         >
                                             <WhatsAppIcon className="w-3 h-3 mr-1" />
-                                            {col.id === 'new' ? 'Disparar' : 'Conversar'}
+                                            {col.id === 'new' ? 'Disparar' : 'Enviar'}
                                         </button>
                                         
                                         {/* Move Next Button */}
@@ -227,7 +298,7 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
                                                     const next = col.id === 'new' ? 'contacted' : col.id === 'contacted' ? 'negotiation' : 'closed';
                                                     moveStage(lead, next);
                                                 }}
-                                                className="px-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded border border-slate-700"
+                                                className="px-2 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded border border-slate-700 hover:text-white"
                                                 title="Mover para próxima etapa"
                                             >
                                                 <ArrowRightIcon className="w-4 h-4" />

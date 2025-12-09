@@ -1,5 +1,4 @@
 
-
 import React from 'react';
 import { Lead } from '../types';
 import { InstagramIcon, PhoneIcon, GlobeIcon, WhatsAppIcon, SaveIcon, FireIcon, TargetIcon } from './ui/Icons';
@@ -38,7 +37,7 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => 
       {isHot && (
         <div className="absolute -top-2 -right-2 bg-orange-600 text-white text-[10px] font-bold px-2 py-1 rounded-full flex items-center shadow-lg shadow-orange-500/30 z-20 animate-pulse">
             <FireIcon className="w-3 h-3 mr-1" />
-            HOT LEAD
+            LEAD QUENTE
         </div>
       )}
 
