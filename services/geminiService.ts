@@ -1,3 +1,6 @@
+// @ts-nocheck
+declare var process: any;
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights, ObjectionType, SequenceDay, RoleplayProfile, RoleplayMessage, ChatAnalysis, SearchFilters } from "../types";
 
