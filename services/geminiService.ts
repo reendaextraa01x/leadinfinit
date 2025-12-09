@@ -6,7 +6,7 @@ import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadSta
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Helper ROBUSTO para limpar JSON (Versão Blindada v2)
+// Helper ROBUSTO para limpar JSON (Versão Blindada v3)
 const extractJson = (text: string): any => {
   try {
     // 1. Tenta encontrar blocos de código explícitos
@@ -27,15 +27,20 @@ const extractJson = (text: string): any => {
     // 3. Fallback: Tenta parsear o texto todo
     return JSON.parse(text);
   } catch (e) {
-    console.error("Falha crítica ao processar JSON da IA. Texto recebido:", text);
-    return []; // Retorna array vazio para não quebrar a app
+    console.error("JSON Parse Error:", e);
+    return []; 
   }
 };
 
 const cleanPhone = (phone: string): string | null => {
   if (!phone) return null;
+  // Remove tudo que não é dígito
   const cleaned = phone.replace(/\D/g, '');
+  
+  // Aceita números fixos (10 dígitos) e celulares (11 dígitos) do Brasil
+  // Aceita também formatos internacionais se tiverem pelo menos 8 dígitos
   if (cleaned.length < 8) return null;
+  
   return cleaned;
 };
 
@@ -44,7 +49,7 @@ const calculateLeadScore = (lead: any): LeadScore => {
     if (!lead.website || lead.website === "Não encontrado" || lead.website === "" || lead.website === "Sem Site") {
         return 'hot';
     }
-    if (lead.instagram) {
+    if (lead.instagram && lead.instagram !== "Não encontrado") {
         return 'warm';
     }
     return 'cold';
@@ -68,72 +73,75 @@ export const generateLeads = async (
   let allLeads: Lead[] = [];
   let allSources: GroundingSource[] = [];
   let attempts = 0;
-  const maxAttempts = 3; // Limite de segurança para não ficar em loop infinito
+  const maxAttempts = 4; // Aumentado para insistir mais
   
   // Lista negra temporária para esta sessão de busca
   let currentSessionNames = [...existingNames];
 
-  // O Loop continua enquanto não tivermos leads suficientes E não estourarmos as tentativas
+  // Estratégias de busca rotativas para variar os resultados do Google
+  const searchQueries = [
+      `${niche} em ${location} whatsapp telefone contato`,
+      `melhores ${niche} em ${location} lista`,
+      `empresas de ${niche} ${location} instagram`,
+      `${niche} ${location} site oficial`
+  ];
+
   while (allLeads.length < targetCount && attempts < maxAttempts) {
+      const currentQuery = searchQueries[attempts % searchQueries.length];
       attempts++;
+      
       const leadsNeeded = targetCount - allLeads.length;
       
-      // Pedimos sempre o triplo do que falta para garantir que o filtro de telefone não zere a lista
-      // Mas limitamos o pedido máximo por vez para não estourar tokens da IA
-      const requestBatchSize = Math.min(Math.max(leadsNeeded * 3, 10), 30);
+      // Pedimos mais para compensar a filtragem
+      const requestBatchSize = Math.max(leadsNeeded * 2, 10);
 
-      console.log(`[Busca] Tentativa ${attempts}: Precisamos de ${leadsNeeded}, pedindo ${requestBatchSize}...`);
+      console.log(`[Busca] Tentativa ${attempts}: Query="${currentQuery}". Pedindo ${requestBatchSize}...`);
 
       let serviceStrategy = "";
       if (serviceContext && serviceContext.serviceName) {
         serviceStrategy = `
-        CONTEXTO DO USUÁRIO (VENDEDOR):
+        CONTEXTO DO VENDEDOR:
         - Vende: "${serviceContext.serviceName}"
-        - Alvo: "${serviceContext.targetAudience || 'Geral'}"
-        - Objetivo: Encontrar empresas que PRECISAM desse serviço.
+        - Objetivo: Encontrar empresas que PRECISAM desse serviço (Ex: sem site, mal avaliadas).
         `;
       }
     
       let advancedFilters = "";
       if (filters) {
-          if (filters.websiteRule === 'must_have') advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter um website ativo listado.\n";
-          if (filters.websiteRule === 'must_not_have') advancedFilters += "- OBRIGATÓRIO: O lead NÃO PODE ter website (ou deve estar quebrado/404).\n";
-          if (filters.mustHaveInstagram) advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter perfil no Instagram.\n";
-          if (filters.mobileOnly) advancedFilters += "- PREFERÊNCIA: Priorize números de celular/WhatsApp ((XX) 9...).\n";
+          if (filters.websiteRule === 'must_have') advancedFilters += "- APENAS empresas com site.\n";
+          if (filters.websiteRule === 'must_not_have') advancedFilters += "- PRIORIZE empresas SEM site ou com site ruim.\n";
+          if (filters.mustHaveInstagram) advancedFilters += "- OBRIGATÓRIO ter Instagram.\n";
       }
     
       const prompt = `
-        ATUE COMO UM EXTRACTOR DE DADOS DE NEGÓCIOS DE ELITE (Modo Hunter V3).
+        ATUE COMO UM PESQUISADOR DE DADOS COMERCIAIS PÚBLICOS.
         
-        SUA MISSÃO: Realizar uma busca profunda no Google para encontrar leads qualificados.
-        
-        PARÂMETROS DE BUSCA:
-        - Termo Principal: "${niche}"
-        - Localização: "${location}"
-        - Modificadores de Busca: "WhatsApp", "Contato", "Telefone", "Instagram"
+        TAREFA: Listar empresas reais encontradas no Google Maps/Search.
+        BUSCA: "${currentQuery}"
         
         ${serviceStrategy}
         ${advancedFilters}
-        ${customInstruction ? `ORDEM ESPECIAL (PRIORIDADE MÁXIMA): ${customInstruction}` : ""}
+        ${customInstruction ? `ORDEM ESPECIAL: ${customInstruction}` : ""}
         
-        REGRAS DE EXTRAÇÃO (CRÍTICO):
-        1. VOCÊ DEVE EXTRAIR ${requestBatchSize} NOVOS CANDIDATOS NESTA RODADA.
-        2. *** FILTRO DE TELEFONE ***: É INACEITÁVEL retornar um lead sem telefone.
-           - Busque no Google Maps, Rodapé de Sites, Bios de Instagram.
-           - Se não achar o telefone, DESCARTE O LEAD e busque outro.
-        3. IGNORAR ESTES NOMES (JÁ LISTADOS): ${currentSessionNames.join(", ")}.
+        REGRAS RÍGIDAS:
+        1. Extraia EXATAMENTE ${requestBatchSize} resultados ÚNICOS.
+        2. FOCO EM DADOS DE CONTATO:
+           - Tente encontrar o TELEFONE ou WHATSAPP público da empresa.
+           - Se encontrar no Facebook/Instagram/Site, inclua.
+           - Se NÃO encontrar telefone, mas a empresa parecer muito boa, inclua mesmo assim (mas priorize com telefone).
+        3. IGNORE estes nomes já listados: ${currentSessionNames.join(", ")}.
         4. IDIOMA: PORTUGUÊS (PT-BR).
     
-        ESTRUTURA DE RESPOSTA (JSON ARRAY PURO):
+        RETORNE APENAS UM JSON ARRAY:
         [
           {
             "name": "Nome da Empresa",
-            "phone": "(XX) 9XXXX-XXXX", 
+            "phone": "Telefone (Formato (XX) XXXX-XXXX)", 
             "instagram": "Link ou 'Não encontrado'",
             "website": "Link ou 'Sem Site'",
-            "description": "O que eles fazem e qual o estado digital deles (ex: Site ruim, Sem insta).",
-            "painPoints": ["Sem Site", "Pouca Avaliação"],
-            "matchReason": "Motivo da escolha.",
+            "description": "Breve descrição e estado digital (ex: Sem site, Insta desatualizado).",
+            "painPoints": ["Sem Site", "Review Baixo"],
+            "matchReason": "Por que é um bom lead.",
             "qualityTier": "high-ticket" | "opportunity" | "urgent"
           }
         ]
@@ -145,7 +153,7 @@ export const generateLeads = async (
           contents: prompt,
           config: {
             tools: [{ googleSearch: {} }],
-            temperature: 0.7, 
+            temperature: 0.7, // Um pouco mais criativo para achar variações de dados
           },
         });
     
@@ -160,8 +168,7 @@ export const generateLeads = async (
             allSources = [...allSources, ...newSources];
         }
     
-        if (Array.isArray(rawLeads)) {
-            // Processamento e Filtragem Rigorosa
+        if (Array.isArray(rawLeads) && rawLeads.length > 0) {
             const validLeadsInBatch: Lead[] = rawLeads
               .map((item: any, index: number) => ({
                 id: `${Date.now()}-${attempts}-${index}-${Math.random().toString(36).substr(2, 9)}`,
@@ -171,45 +178,53 @@ export const generateLeads = async (
                 description: item.description || "Sem descrição disponível.",
                 website: (item.website === "Not Found" || !item.website || item.website === "Sem Site" || item.website === "Não encontrado") ? undefined : item.website,
                 painPoints: Array.isArray(item.painPoints) ? item.painPoints : [],
-                matchReason: item.matchReason || "Lead compatível com o nicho.",
+                matchReason: item.matchReason || "Lead compatível.",
                 confidenceScore: 1,
                 status: 'new' as LeadStatus,
                 score: calculateLeadScore(item),
                 qualityTier: item.qualityTier || 'opportunity'
               }))
               .filter((lead) => {
-                // Filtro 1: Telefone Válido
-                const isNotFound = lead.phone === "Não encontrado" || lead.phone === "Not Found" || !lead.phone;
-                const clean = cleanPhone(lead.phone);
-                if (isNotFound || !clean) return false;
-
-                // Filtro 2: Duplicidade (Nome ou Telefone já existente nesta sessão)
+                // Filtro de Duplicidade
                 const isDuplicate = currentSessionNames.some(existingName => 
                     existingName.toLowerCase() === lead.name.toLowerCase() ||
-                    lead.phone.includes(existingName) // Verifica grosseira se telefone já foi usado como chave
+                    (lead.phone !== "Não encontrado" && lead.phone.includes(existingName)) 
                 );
+                if (isDuplicate) return false;
+
+                // Filtro de Telefone:
+                // Se o usuário pediu "Apenas Celular" (mobileOnly), somos estritos.
+                // Caso contrário, aceitamos se tiver qualquer número válido (tamanho > 8)
+                const clean = cleanPhone(lead.phone);
                 
-                return !isDuplicate;
+                // Se não tem telefone nenhum, descarta (conforme pedido "contatos válidos")
+                if (!clean) return false;
+
+                // Se o usuário exigiu mobileOnly no filtro, checamos se parece celular (11 dígitos ou começa com 9)
+                if (filters?.mobileOnly) {
+                   // No Brasil, celulares têm 11 dígitos. Fixos têm 10.
+                   // Mas permitimos passar se for 10 ou 11 para não perder leads bons que formataram errado.
+                   return clean.length >= 10;
+                }
+
+                return true;
               });
 
-            // Adiciona os válidos à lista principal
-            allLeads = [...allLeads, ...validLeadsInBatch];
+            if (validLeadsInBatch.length > 0) {
+                allLeads = [...allLeads, ...validLeadsInBatch];
+                validLeadsInBatch.forEach(l => currentSessionNames.push(l.name));
+            }
             
-            // Atualiza a lista negra para a próxima iteração
-            validLeadsInBatch.forEach(l => currentSessionNames.push(l.name));
-            
-            // Se já temos o suficiente, paramos o loop
             if (allLeads.length >= targetCount) break;
         }
     
       } catch (error) {
         console.error(`Erro na tentativa ${attempts}:`, error);
-        // Continua para a próxima tentativa se der erro
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Espera um pouco antes de tentar de novo
       }
   }
 
-  // Retorna o que conseguimos (mesmo se for um pouco menos ou mais que o target)
-  // Limitamos ao targetCount para não poluir a tela se vier demais
+  // Retorna o que conseguimos
   return { leads: allLeads.slice(0, targetCount), sources: allSources };
 };
 
@@ -248,7 +263,6 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
              "Empresas invisíveis na primeira página do Google"
         ];
     } catch (e) {
-        console.error("Erro ao gerar prompts táticos:", e);
         return [
              "Apenas empresas com site quebrado ou fora do ar",
              "Negócios com muitas reclamações recentes",
