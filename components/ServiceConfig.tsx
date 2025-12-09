@@ -61,7 +61,8 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
       
       setIsGeneratingOffer(true);
       try {
-          const killerOffer = await generateKillerDifferential(context.serviceName, context.description);
+          // Passamos agora o Público Alvo para garantir que a oferta não seja genérica
+          const killerOffer = await generateKillerDifferential(context.serviceName, context.description, context.targetAudience || "Seus Clientes");
           
           // Typewriter effect simulation
           setContext(prev => ({ ...prev, description: "" }));

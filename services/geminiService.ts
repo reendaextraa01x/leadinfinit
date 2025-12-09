@@ -390,55 +390,56 @@ export const generateServiceInsights = async (serviceName: string, description: 
 };
 
 /**
- * OFERTA IRRESISTÍVEL (AGORA COM VARIAÇÃO DE FRAMEWORKS PODEROSOS)
+ * OFERTA IRRESISTÍVEL (AGORA COM VARIAÇÃO DE FRAMEWORKS PODEROSOS E PERSONALIZAÇÃO DE NOME)
  */
-export const generateKillerDifferential = async (serviceName: string, currentDescription: string): Promise<string> => {
+export const generateKillerDifferential = async (serviceName: string, description: string, targetAudience: string = "Clientes"): Promise<string> => {
     // ROLETA DE FRAMEWORKS DE COPYWRITING DE ELITE
     const frameworks = [
-        "GARANTIA DE RISCO REVERSO (Se eu falhar, eu te pago + bônus)",
-        "MECANISMO ÚNICO (Nome proprietário + Método novo)",
-        "OFERTA MAFIOSA (Uma oferta tão boa que recusar parece burrice)",
-        "ANTI-AGÊNCIA (Nós não fazemos X [coisa chata], nós fazemos Y [resultado])",
-        "A PROMESSA DE VELOCIDADE (Resultado em X dias ou grátis)",
-        "O INIMIGO COMUM (Não é culpa sua, é culpa do 'Método Tradicional')",
-        "IDENTIDADE E STATUS (Não compre um site, compre a autoridade de Líder de Mercado)"
+        "GARANTIA DE RISCO REVERSO (Eu assumo o risco financeiro)",
+        "MECANISMO ÚNICO (Nome proprietário científico + Método novo)",
+        "OFERTA MAFIOSA (Irrecusável pela lógica financeira)",
+        "ANTI-AGÊNCIA (Nós odiamos o modelo padrão, fazemos o oposto)",
+        "A PROMESSA DE VELOCIDADE (Resultado rápido ou multa)",
+        "IDENTIDADE E STATUS (Venda para o Ego do cliente)"
     ];
     
-    // Escolhe um aleatoriamente para garantir que cada clique gere algo novo
     const selectedFramework = frameworks[Math.floor(Math.random() * frameworks.length)];
 
     const prompt = `
-      ATUE COMO O MELHOR COPYWRITER DO MUNDO (Nível Alex Hormozi / Dan Kennedy).
+      ATUE COMO O MELHOR COPYWRITER DO MUNDO (Alex Hormozi Mode).
       
       FRAMEWORK ESCOLHIDO PARA ESTA VERSÃO: ${selectedFramework}.
-      (Você DEVE usar a psicologia deste framework especificamente).
 
-      O USUÁRIO VENDE: "${serviceName}"
-      CONTEXTO ATUAL: "${currentDescription}"
+      DADOS DO USUÁRIO:
+      - SERVIÇO: "${serviceName}"
+      - PÚBLICO ALVO: "${targetAudience}"
+      - CONTEXTO: "${description}"
 
-      OBJETIVO: Reescrever a oferta para ser ÚNICA, EXCLUSIVA e OUSADA.
+      SUA MISSÃO: Criar uma oferta ÚNICA e EXCLUSIVA para este público específico.
       
-      REGRAS DE OURO:
-      1. NUNCA use palavras genéricas como "Otimização", "Qualidade", "Melhor serviço".
-      2. USE Nomes Próprios (Crie um nome para o método).
-      3. USE Números Específicos (Dias, Reais, Porcentagem).
-      4. CRIE uma Garantia Condicional forte.
-      5. SEJA CURTO e IMPACTANTE (Máximo 3 frases).
+      REGRAS OBRIGATÓRIAS:
+      1. CITE O NOME DO PÚBLICO ALVO (${targetAudience}) explicitamente.
+      2. CRIE UM NOME PARA O MÉTODO (Ex: Protocolo X, Sistema Y). Não use o nome genérico do serviço.
+      3. CRIE UMA GARANTIA ESPECÍFICA (Ex: "Devolvo R$ 500", "Trabalho de graça").
+      4. NUNCA use o texto genérico "Sistema de Aquisição Automática". INVENTE ALGO NOVO AGORA.
 
-      Exemplo do tom desejado: "Instalamos o Protocolo Venda-Automática em 14 dias. Se não gerar 5 leads na primeira semana, devolvo seu investimento em dobro."
-
-      SAÍDA: Apenas o texto da oferta em PORTUGUÊS DO BRASIL.
+      SAÍDA (Texto curto e impactante, máx 3 linhas):
     `;
     
     try {
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: prompt,
-            config: { temperature: 1.0 } // Máxima criatividade
+            config: { temperature: 1.2 } // Temperatura Extrema para garantir que nunca repita
         });
-        return response.text?.trim() || "";
+        const text = response.text?.trim();
+        if (!text || text.length < 10) throw new Error("Resposta curta demais");
+        return text;
     } catch (e) {
-        return "Implemento o Sistema de Aquisição Automática em 14 dias. Se não gerar ROI positivo no primeiro mês, devolvo 100% do seu dinheiro e trabalho de graça até gerar.";
+        // Fallback dinâmico em vez de estático
+        const audience = targetAudience || "seus clientes";
+        const service = serviceName || "serviço";
+        return `Implemento o Método ${service.split(' ')[0]}-Turbo para ${audience}. Se não dobrar seus resultados em 30 dias, eu devolvo 100% do investimento e pago R$ 200 do meu bolso.`;
     }
 };
 
