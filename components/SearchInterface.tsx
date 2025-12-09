@@ -1,14 +1,15 @@
-
 import React, { useState, useEffect } from 'react';
-import { SearchIcon, HistoryIcon, TrashIcon } from './ui/Icons';
-import { BusinessSize, SearchHistoryItem } from '../types';
+import { SearchIcon, HistoryIcon, TrashIcon, FilterIcon, TargetIcon, MagicIcon } from './ui/Icons';
+import { BusinessSize, SearchHistoryItem, SearchFilters, ServiceContext } from '../types';
+import { generateTacticalPrompts } from '../services/geminiService';
 
 interface SearchInterfaceProps {
-  onSearch: (niche: string, location: string, size: BusinessSize, count: number) => void;
+  onSearch: (niche: string, location: string, size: BusinessSize, count: number, filters: SearchFilters, customInstruction: string) => void;
   isLoading: boolean;
   progress: number;
   history: SearchHistoryItem[];
   onClearHistory: () => void;
+  serviceContext: ServiceContext;
 }
 
 const TOP_NICHES = [
@@ -24,12 +25,25 @@ const TOP_NICHES = [
   "Restaurantes"
 ];
 
-const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, progress, history, onClearHistory }) => {
+const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, progress, history, onClearHistory, serviceContext }) => {
   const [niche, setNiche] = useState('');
   const [location, setLocation] = useState('');
   const [size, setSize] = useState<BusinessSize>('small');
   const [count, setCount] = useState<number>(6); // Default to 6
   const [loadingText, setLoadingText] = useState("Iniciando...");
+  
+  // FILTERS
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState<SearchFilters>({
+      websiteRule: 'any',
+      mustHaveInstagram: false,
+      mobileOnly: true // Default to true as user requested quality
+  });
+  const [customInstruction, setCustomInstruction] = useState("");
+
+  // TACTICAL PROMPTS
+  const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([]);
+  const [isGeneratingPrompts, setIsGeneratingPrompts] = useState(false);
 
   // Dynamic loading text based on progress
   useEffect(() => {
@@ -44,7 +58,7 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (niche.trim() && location.trim()) {
-      onSearch(niche, location, size, count);
+      onSearch(niche, location, size, count, filters, customInstruction);
     }
   };
 
@@ -52,8 +66,19 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
     setNiche(item.niche);
     setLocation(item.location);
     setSize(item.size);
-    // Don't auto submit, let user adjust count if needed
   };
+
+  const handleGeneratePrompts = async () => {
+      setIsGeneratingPrompts(true);
+      try {
+          const prompts = await generateTacticalPrompts(serviceContext);
+          setSuggestedPrompts(prompts);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setIsGeneratingPrompts(false);
+      }
+  }
 
   // Estimate time: roughly 2.5s per lead requested + 2s overhead
   const estimatedTime = Math.ceil((count * 2.5) + 2);
@@ -190,6 +215,104 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
                 </span>
               )}
             </button>
+          </div>
+
+          {/* ADVANCED FILTERS TOGGLE */}
+          <div className="border-t border-slate-800 mt-2 pt-2">
+            <button 
+                type="button"
+                onClick={() => setShowFilters(!showFilters)}
+                className="flex items-center text-xs text-slate-400 hover:text-white transition-colors"
+            >
+                <FilterIcon className="w-4 h-4 mr-1" />
+                {showFilters ? "Ocultar Filtros Sniper" : "Mostrar Filtros Sniper (Controle de Qualidade)"}
+            </button>
+
+            {showFilters && (
+                <div className="mt-4 animate-fade-in space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-900/50 p-3 rounded-lg border border-slate-800">
+                        {/* Website Rule */}
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Filtro de Site</label>
+                            <select 
+                                value={filters.websiteRule}
+                                onChange={(e) => setFilters({...filters, websiteRule: e.target.value as any})}
+                                className="w-full bg-slate-800 text-white text-xs p-2 rounded border border-slate-700 focus:outline-none"
+                            >
+                                <option value="any">Indiferente</option>
+                                <option value="must_not_have">NÃO pode ter Site (Oportunidade)</option>
+                                <option value="must_have">DEVE ter Site (Melhoria/SEO)</option>
+                            </select>
+                        </div>
+                        {/* Instagram Rule */}
+                        <div className="flex items-center">
+                             <label className="flex items-center cursor-pointer">
+                                 <input 
+                                    type="checkbox" 
+                                    checked={filters.mustHaveInstagram}
+                                    onChange={(e) => setFilters({...filters, mustHaveInstagram: e.target.checked})}
+                                    className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-accent focus:ring-0 focus:ring-offset-0"
+                                 />
+                                 <span className="ml-2 text-xs text-slate-300">Exigir Instagram Ativo</span>
+                             </label>
+                        </div>
+                         {/* Phone Rule */}
+                         <div className="flex items-center">
+                             <label className="flex items-center cursor-pointer">
+                                 <input 
+                                    type="checkbox" 
+                                    checked={filters.mobileOnly}
+                                    onChange={(e) => setFilters({...filters, mobileOnly: e.target.checked})}
+                                    className="w-4 h-4 rounded bg-slate-800 border-slate-700 text-accent focus:ring-0 focus:ring-offset-0"
+                                 />
+                                 <span className="ml-2 text-xs text-slate-300">Apenas Celular/WhatsApp (Ignorar Fixo)</span>
+                             </label>
+                        </div>
+                    </div>
+
+                    {/* LASER SCOPE (CUSTOM PROMPT) */}
+                    <div>
+                        <div className="flex justify-between items-center mb-2">
+                             <label className="flex items-center text-[10px] font-bold text-red-400 uppercase tracking-wider">
+                                <TargetIcon className="w-3 h-3 mr-1" />
+                                MIRA LASER (Instrução Personalizada)
+                            </label>
+                            <button
+                                type="button"
+                                onClick={handleGeneratePrompts}
+                                disabled={isGeneratingPrompts}
+                                className="text-[10px] flex items-center gap-1 text-accent hover:text-white transition-colors bg-accent/10 px-2 py-1 rounded"
+                            >
+                                <MagicIcon className={`w-3 h-3 ${isGeneratingPrompts ? 'animate-spin' : ''}`} />
+                                ✨ Gerar Ideias de Busca
+                            </button>
+                        </div>
+                        
+                        {/* SUGGESTED PROMPTS CHIPS */}
+                        {suggestedPrompts.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mb-2 animate-fade-in">
+                                {suggestedPrompts.map((prompt, idx) => (
+                                    <button
+                                        key={idx}
+                                        type="button"
+                                        onClick={() => setCustomInstruction(prompt)}
+                                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700 transition-colors text-left"
+                                    >
+                                        "{prompt}"
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+
+                        <textarea 
+                            value={customInstruction}
+                            onChange={(e) => setCustomInstruction(e.target.value)}
+                            placeholder="Dê uma ordem específica para a IA. Ex: 'Apenas clínicas de estética que fazem harmonização facial' ou 'Restaurantes com nota menor que 4.0 no Google'."
+                            className="w-full h-16 bg-red-900/10 border border-red-500/30 rounded-lg p-3 text-xs text-white placeholder-red-300/50 focus:outline-none focus:border-red-500 transition-colors resize-none"
+                        />
+                    </div>
+                </div>
+            )}
           </div>
 
         </div>

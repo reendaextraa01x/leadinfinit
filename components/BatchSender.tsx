@@ -1,9 +1,9 @@
 
 
 import React, { useState } from 'react';
-import { Lead, ServiceContext, LeadStatus, ObjectionType } from '../types';
-import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon } from './ui/Icons';
-import { generateMarketingCopy, generateLeadAudit, handleObjection, calculateInactionCost } from '../services/geminiService';
+import { Lead, ServiceContext, LeadStatus, ObjectionType, ChatAnalysis } from '../types';
+import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon, MicroscopeIcon, XIcon, LightBulbIcon } from './ui/Icons';
+import { generateMarketingCopy, generateLeadAudit, handleObjection, calculateInactionCost, analyzeChatHistory } from '../services/geminiService';
 
 interface BatchSenderProps {
   savedLeads: Lead[];
@@ -36,6 +36,21 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
   const [leadStates, setLeadStates] = useState<Record<string, LeadWithStatus>>({});
   const [useDesktopApp, setUseDesktopApp] = useState(false);
   const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+  
+  // CHAT ANALYSIS STATE
+  const [analysisModal, setAnalysisModal] = useState<{
+      isOpen: boolean;
+      leadName: string;
+      text: string;
+      result: ChatAnalysis | null;
+      isAnalyzing: boolean;
+  }>({
+      isOpen: false,
+      leadName: '',
+      text: '',
+      result: null,
+      isAnalyzing: false
+  });
 
   // Initialize state
   React.useEffect(() => {
@@ -135,6 +150,29 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
       }
   };
 
+  const openAnalysisModal = (leadName: string) => {
+      setAnalysisModal({
+          isOpen: true,
+          leadName,
+          text: '',
+          result: null,
+          isAnalyzing: false
+      });
+  };
+
+  const handleRunAnalysis = async () => {
+      if(!analysisModal.text.trim()) return;
+      setAnalysisModal(prev => ({ ...prev, isAnalyzing: true }));
+      try {
+          const result = await analyzeChatHistory(analysisModal.text, serviceContext);
+          setAnalysisModal(prev => ({ ...prev, result }));
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setAnalysisModal(prev => ({ ...prev, isAnalyzing: false }));
+      }
+  };
+
   const toggleTools = (id: string) => {
       setLeadStates(prev => ({...prev, [id]: { ...prev[id], showTools: !prev[id].showTools }}));
   }
@@ -152,8 +190,96 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
   ];
 
   return (
-    <div className="max-w-[1600px] mx-auto animate-fade-in pb-20 px-4">
+    <div className="max-w-[1600px] mx-auto animate-fade-in pb-20 px-4 relative">
       
+      {/* CHAT ANALYSIS MODAL */}
+      {analysisModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+              <div className="bg-surface border border-slate-700 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+                  <div className="flex justify-between items-center p-4 border-b border-slate-700">
+                      <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                          <MicroscopeIcon className="w-6 h-6 text-accent" />
+                          Autópsia da Negociação: {analysisModal.leadName}
+                      </h3>
+                      <button onClick={() => setAnalysisModal(prev => ({ ...prev, isOpen: false }))} className="text-slate-500 hover:text-white">
+                          <XIcon className="w-6 h-6" />
+                      </button>
+                  </div>
+                  
+                  <div className="p-6 overflow-y-auto flex-1">
+                      {!analysisModal.result ? (
+                          <>
+                              <p className="text-sm text-slate-400 mb-4">
+                                  Copie a conversa inteira do WhatsApp (Ctrl+A, Ctrl+C) e cole aqui. A IA vai ler as entrelinhas e dizer como fechar a venda.
+                              </p>
+                              <textarea 
+                                  value={analysisModal.text}
+                                  onChange={(e) => setAnalysisModal(prev => ({ ...prev, text: e.target.value }))}
+                                  placeholder="Cole o histórico da conversa aqui..."
+                                  className="w-full h-64 bg-slate-900 border border-slate-800 rounded-lg p-4 text-xs font-mono text-slate-300 focus:border-accent focus:outline-none resize-none"
+                              />
+                              <div className="mt-4 flex justify-end">
+                                  <button 
+                                      onClick={handleRunAnalysis}
+                                      disabled={analysisModal.isAnalyzing || !analysisModal.text}
+                                      className="bg-accent hover:bg-cyan-400 text-surface font-bold py-3 px-6 rounded-lg flex items-center gap-2 transition-transform active:scale-95 disabled:opacity-50"
+                                  >
+                                      {analysisModal.isAnalyzing ? (
+                                          <>Analizando Padrões...</>
+                                      ) : (
+                                          <>
+                                              <MicroscopeIcon className="w-5 h-5" />
+                                              Analisar Conversa
+                                          </>
+                                      )}
+                                  </button>
+                              </div>
+                          </>
+                      ) : (
+                          <div className="space-y-6 animate-fade-in">
+                              {/* SCORE */}
+                              <div className="flex items-center gap-4 bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                                  <div className={`text-4xl font-black ${analysisModal.result.score > 70 ? 'text-green-500' : analysisModal.result.score > 40 ? 'text-yellow-500' : 'text-red-500'}`}>
+                                      {analysisModal.result.score}%
+                                  </div>
+                                  <div>
+                                      <p className="text-xs font-bold uppercase text-slate-500">Probabilidade de Fechamento</p>
+                                      <p className="text-sm text-white">{analysisModal.result.sentiment === 'positive' ? 'Cliente Interessado' : analysisModal.result.sentiment === 'negative' ? 'Cliente Resistente' : 'Cliente Indeciso'}</p>
+                                  </div>
+                              </div>
+
+                              {/* HIDDEN INTENT */}
+                              <div className="bg-purple-900/20 border border-purple-500/30 p-4 rounded-xl">
+                                  <h4 className="text-xs font-bold text-purple-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                      <MagicIcon className="w-4 h-4" /> Intenção Oculta
+                                  </h4>
+                                  <p className="text-white text-sm italic">"{analysisModal.result.hiddenIntent}"</p>
+                              </div>
+
+                              {/* NEXT MOVE */}
+                              <div className="bg-green-900/20 border border-green-500/30 p-4 rounded-xl">
+                                  <h4 className="text-xs font-bold text-green-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                      <LightBulbIcon className="w-4 h-4" /> Próximo Movimento Perfeito
+                                  </h4>
+                                  <div className="bg-slate-950 p-3 rounded border border-green-500/20 text-green-100 font-mono text-sm">
+                                      {analysisModal.result.nextMove}
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-2">💡 Dica Estratégica: {analysisModal.result.tip}</p>
+                              </div>
+
+                              <button 
+                                  onClick={() => setAnalysisModal(prev => ({ ...prev, result: null }))}
+                                  className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-bold"
+                              >
+                                  Nova Análise
+                              </button>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
         <div>
@@ -246,11 +372,23 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
                                                 className="w-full py-1 bg-slate-800 hover:bg-slate-700 text-xs text-slate-400 flex items-center justify-center gap-1 rounded border border-slate-700"
                                             >
                                                 <ShieldIcon className="w-3 h-3" />
-                                                {state.showTools ? 'Ocultar Ferramentas de Venda' : 'Abrir Kit de Fechamento'}
+                                                {state.showTools ? 'Ocultar Ferramentas' : 'Ferramentas de Fechamento'}
                                             </button>
 
                                             {state.showTools && (
                                                 <div className="mt-2 p-2 bg-slate-900 rounded border border-slate-800 animate-fade-in">
+                                                    
+                                                    {/* NEW: ANALYSIS BUTTON */}
+                                                    <button 
+                                                        onClick={() => openAnalysisModal(lead.name)}
+                                                        className="w-full py-1.5 mb-2 bg-accent/10 hover:bg-accent/20 text-accent text-[10px] font-bold rounded border border-accent/20 flex items-center justify-center gap-1 transition-colors"
+                                                    >
+                                                        <MicroscopeIcon className="w-3 h-3" />
+                                                        Analisar Conversa Real
+                                                    </button>
+
+                                                    <div className="border-t border-slate-800 my-2"></div>
+
                                                     <p className="text-[10px] text-slate-500 uppercase font-bold mb-2">Quebrador de Objeções (IA)</p>
                                                     <div className="grid grid-cols-2 gap-1 mb-3">
                                                         <button disabled={state.isHandlingObjection} onClick={() => handleAiObjection(lead, 'expensive')} className="p-1 bg-slate-800 hover:bg-slate-700 text-[10px] rounded border border-slate-700">💸 "Tá Caro"</button>

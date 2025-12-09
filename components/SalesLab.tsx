@@ -1,6 +1,7 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { ServiceContext, SequenceDay, RoleplayProfile, RoleplayMessage } from '../types';
-import { BrainIcon, RobotIcon, ClockIcon, SwordsIcon, MagicIcon, CopyIcon, SendIcon } from './ui/Icons';
+import { BrainIcon, RobotIcon, ClockIcon, SwordsIcon, MagicIcon, CopyIcon, SendIcon, LightBulbIcon } from './ui/Icons';
 import { generateNeuroSequence, runRoleplayTurn } from '../services/geminiService';
 
 interface SalesLabProps {
@@ -48,7 +49,8 @@ const SalesLab: React.FC<SalesLabProps> = ({ serviceContext }) => {
         sender: 'ai', 
         text: "Oi. Quem é e o que você quer? (Seja breve, tô ocupado)", 
         feedback: "O cliente iniciou a conversa com uma barreira defensiva. Tente quebrar o padrão ou gerar curiosidade imediata.",
-        score: 5 
+        score: 5,
+        betterResponse: "Oi [Nome], aqui é o [Seu Nome]. Vi que você é o proprietário da [Empresa] e tenho uma ideia rápida pra aumentar seu movimento às terças. Pode falar 30s?"
     }]);
   };
 
@@ -228,7 +230,7 @@ const SalesLab: React.FC<SalesLabProps> = ({ serviceContext }) => {
                                         {msg.text}
                                     </div>
 
-                                    {/* AI FEEDBACK CARD */}
+                                    {/* AI FEEDBACK CARD (WITH BETTER RESPONSE) */}
                                     {msg.sender === 'ai' && msg.feedback && (
                                         <div className="mt-2 ml-2 max-w-[85%] bg-gradient-to-r from-purple-900/40 to-slate-900 border border-purple-500/30 rounded-lg p-3 animate-fade-in">
                                             <div className="flex items-center gap-2 mb-1">
@@ -237,7 +239,20 @@ const SalesLab: React.FC<SalesLabProps> = ({ serviceContext }) => {
                                                     Nota: {msg.score}/10
                                                 </span>
                                             </div>
-                                            <p className="text-xs text-slate-300 italic">"{msg.feedback}"</p>
+                                            <p className="text-xs text-slate-300 italic mb-2">"{msg.feedback}"</p>
+                                            
+                                            {/* BETTER RESPONSE SECTION */}
+                                            {msg.betterResponse && (
+                                                <div className="border-t border-purple-500/30 pt-2 mt-2">
+                                                    <div className="flex items-center gap-1 mb-1">
+                                                        <LightBulbIcon className="w-3 h-3 text-yellow-400" />
+                                                        <span className="text-[10px] font-bold text-yellow-400 uppercase tracking-wider">Alternativa de Mestre</span>
+                                                    </div>
+                                                    <p className="text-xs text-white bg-white/5 p-2 rounded border border-white/10 font-mono">
+                                                        "{msg.betterResponse}"
+                                                    </p>
+                                                </div>
+                                            )}
                                         </div>
                                     )}
                                 </div>

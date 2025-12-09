@@ -1,5 +1,3 @@
-
-
 declare var process: any;
 
 export type LeadStatus = 'new' | 'contacted' | 'negotiation' | 'closed';
@@ -23,6 +21,12 @@ export interface Lead {
 
 export type BusinessSize = 'small' | 'medium' | 'large';
 export type LeadQualityFilter = 'opportunity' | 'high-ticket' | 'urgent';
+
+export interface SearchFilters {
+  websiteRule: 'any' | 'must_have' | 'must_not_have';
+  mustHaveInstagram: boolean;
+  mobileOnly: boolean;
+}
 
 export interface SearchState {
   isSearching: boolean;
@@ -75,4 +79,14 @@ export interface RoleplayMessage {
   text: string;
   feedback?: string; // AI Coach feedback on user's move
   score?: number;    // 0-10 score of the user's response
+  betterResponse?: string; // An alternative "Perfect" response suggested by AI
+}
+
+// CHAT ANALYSIS (AUTOPSY)
+export interface ChatAnalysis {
+  score: number; // 0-100 Probability of closing
+  sentiment: 'positive' | 'neutral' | 'negative';
+  hiddenIntent: string; // The subtext of the client
+  nextMove: string; // The exact text to send next
+  tip: string; // Strategic advice
 }

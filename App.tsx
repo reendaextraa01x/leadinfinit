@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect } from 'react';
 import SearchInterface from './components/SearchInterface';
 import LeadCard from './components/LeadCard';
@@ -7,11 +5,12 @@ import BatchSender from './components/BatchSender';
 import ServiceConfig from './components/ServiceConfig';
 import Dashboard from './components/Dashboard';
 import SalesLab from './components/SalesLab';
+import Tutorial from './components/Tutorial';
 import { generateLeads } from './services/geminiService';
-import { Lead, GroundingSource, BusinessSize, ServiceContext, SearchHistoryItem } from './types';
-import { DownloadIcon, SearchIcon, WhatsAppIcon, SettingsIcon, HomeIcon, BrainIcon } from './components/ui/Icons';
+import { Lead, GroundingSource, BusinessSize, ServiceContext, SearchHistoryItem, SearchFilters } from './types';
+import { DownloadIcon, SearchIcon, WhatsAppIcon, SettingsIcon, HomeIcon, BrainIcon, BookOpenIcon } from './components/ui/Icons';
 
-type Tab = 'dashboard' | 'search' | 'saved' | 'config' | 'lab';
+type Tab = 'dashboard' | 'search' | 'saved' | 'config' | 'lab' | 'tutorial';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('search');
@@ -22,7 +21,7 @@ const App: React.FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [progress, setProgress] = useState(0); // Progress percentage 0-100
   const [error, setError] = useState<string | null>(null);
-  const [searchParams, setSearchParams] = useState<{ niche: string, location: string, size: BusinessSize, count: number } | null>(null);
+  const [searchParams, setSearchParams] = useState<{ niche: string, location: string, size: BusinessSize, count: number, filters?: SearchFilters, customInstruction?: string } | null>(null);
   
   // Persistent State
   const [savedLeads, setSavedLeads] = useState<Lead[]>([]);
@@ -94,7 +93,7 @@ const App: React.FC = () => {
     setProgress(100);
   };
 
-  const handleSearch = async (niche: string, location: string, size: BusinessSize, count: number, append = false) => {
+  const handleSearch = async (niche: string, location: string, size: BusinessSize, count: number, filters?: SearchFilters, customInstruction?: string, append = false) => {
     setIsSearching(true);
     setError(null);
     
@@ -114,13 +113,13 @@ const App: React.FC = () => {
       setLeads([]);
       setSources([]);
     }
-    setSearchParams({ niche, location, size, count });
+    setSearchParams({ niche, location, size, count, filters, customInstruction });
 
     try {
       const existingNames = append ? leads.map(l => l.name) : [];
       
       // Chamada à API
-      const { leads: newLeads, sources: newSources } = await generateLeads(niche, location, size, count, existingNames, serviceContext);
+      const { leads: newLeads, sources: newSources } = await generateLeads(niche, location, size, count, existingNames, serviceContext, filters, customInstruction);
       
       // Assim que a API responde, finalizamos a barra imediatamente
       stopProgressSimulation();
@@ -149,7 +148,7 @@ const App: React.FC = () => {
 
   const handleLoadMore = () => {
     if (searchParams) {
-      handleSearch(searchParams.niche, searchParams.location, searchParams.size, searchParams.count, true);
+      handleSearch(searchParams.niche, searchParams.location, searchParams.size, searchParams.count, searchParams.filters, searchParams.customInstruction, true);
     }
   };
 
@@ -289,6 +288,17 @@ const App: React.FC = () => {
                 <span className="ml-2 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
               )}
             </button>
+            <button
+              onClick={() => setActiveTab('tutorial')}
+              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                activeTab === 'tutorial' 
+                  ? 'bg-yellow-600 text-white shadow-lg shadow-yellow-600/25' 
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <BookOpenIcon className="w-4 h-4 mr-2" />
+              Guia
+            </button>
           </div>
         </div>
 
@@ -308,11 +318,12 @@ const App: React.FC = () => {
             <>
               {/* Search */}
               <SearchInterface 
-                onSearch={(n, l, s, c) => handleSearch(n, l, s, c, false)} 
+                onSearch={(n, l, s, c, f, i) => handleSearch(n, l, s, c, f, i, false)} 
                 isLoading={isSearching} 
                 progress={progress}
                 history={searchHistory}
                 onClearHistory={() => setSearchHistory([])}
+                serviceContext={serviceContext}
               />
 
               {/* Error State */}
@@ -425,6 +436,10 @@ const App: React.FC = () => {
               initialContext={serviceContext}
               onSave={setServiceContext}
             />
+          )}
+
+          {activeTab === 'tutorial' && (
+            <Tutorial onNavigate={(tab: Tab) => setActiveTab(tab)} />
           )}
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights, ObjectionType, SequenceDay, RoleplayProfile, RoleplayMessage } from "../types";
+import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights, ObjectionType, SequenceDay, RoleplayProfile, RoleplayMessage, ChatAnalysis, SearchFilters } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -41,7 +41,9 @@ export const generateLeads = async (
   size: BusinessSize,
   count: number,
   existingNames: string[],
-  serviceContext?: ServiceContext
+  serviceContext?: ServiceContext,
+  filters?: SearchFilters,
+  customInstruction?: string
 ): Promise<{ leads: Lead[], sources: GroundingSource[] }> => {
   
   // Prompt Otimizado para Velocidade e Contexto (HUNTER MODE)
@@ -67,6 +69,25 @@ export const generateLeads = async (
     `;
   }
 
+  // APLICAÇÃO DE FILTROS AVANÇADOS (SNIPER SCOPE)
+  let advancedFilters = "";
+  if (filters) {
+      if (filters.websiteRule === 'must_have') advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter um website ativo.\n";
+      if (filters.websiteRule === 'must_not_have') advancedFilters += "- OBRIGATÓRIO: O lead NÃO PODE ter website (ou deve estar quebrado).\n";
+      if (filters.mustHaveInstagram) advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter perfil no Instagram.\n";
+      if (filters.mobileOnly) advancedFilters += "- OBRIGATÓRIO: Priorize números de celular/WhatsApp ((XX) 9...).\n";
+  }
+
+  // MIRA LASER (Custom Instruction)
+  let laserScope = "";
+  if (customInstruction) {
+      laserScope = `
+      >>> ORDEM PRIORITÁRIA (MIRA LASER) <<<
+      O usuário definiu uma regra específica de busca. SIGA ISSO ACIMA DE TUDO:
+      "${customInstruction}"
+      `;
+  }
+
   // Pede um pouco mais para compensar o filtro de telefone
   const requestCount = Math.ceil(count * 1.5);
 
@@ -80,6 +101,10 @@ export const generateLeads = async (
     
     ${serviceStrategy}
     
+    ${advancedFilters}
+
+    ${laserScope}
+    
     REQUISITOS OBRIGATÓRIOS:
     1. ENCONTRE ${requestCount} LEADS POTENCIAIS.
     2. *** REGRA DO TELEFONE ***: Você DEVE encontrar um número válido (Preferência Celular/WhatsApp). Se não tiver telefone, NÃO INCLUA.
@@ -91,6 +116,7 @@ export const generateLeads = async (
     PARA CADA LEAD, IDENTIFIQUE:
     - "painPoints": Lista de problemas detectados (Ex: ["Sem Site", "Avaliação Baixa", "Instagram Inativo"]). EM PORTUGUÊS.
     - "matchReason": Uma frase curta e persuasiva do porquê esse lead vai comprar. (Ex: "Tem 5k seguidores mas sem link na bio - perdendo vendas."). EM PORTUGUÊS.
+    - "qualityTier": Classifique o poder de compra: 'opportunity' (Pequeno/Iniciante), 'high-ticket' (Estabelecido/Rico), 'urgent' (Com problemas críticos).
 
     Formato de Saída: APENAS ARRAY JSON dentro de um bloco de código.
     [
@@ -101,7 +127,8 @@ export const generateLeads = async (
         "website": "URL ou 'Sem Site'",
         "description": "Breve descrição do negócio em PT-BR.",
         "painPoints": ["Sem Site", "Nota Baixa no Google"],
-        "matchReason": "Alvo ideal pois tem muito fluxo mas presença digital zero."
+        "matchReason": "Alvo ideal pois tem muito fluxo mas presença digital zero.",
+        "qualityTier": "high-ticket"
       }
     ]
   `;
@@ -144,7 +171,8 @@ export const generateLeads = async (
         matchReason: item.matchReason || "Oportunidade de modernização digital.",
         confidenceScore: 1,
         status: 'new' as LeadStatus,
-        score: calculateLeadScore(item)
+        score: calculateLeadScore(item),
+        qualityTier: item.qualityTier || 'opportunity'
       }))
       // O FILTRO: Remove qualquer coisa sem telefone válido
       .filter((lead) => {
@@ -160,6 +188,53 @@ export const generateLeads = async (
     throw error;
   }
 };
+
+/**
+ * GERA PROMPTS TÁTICOS (Sugestões de Busca Inteligente)
+ */
+export const generateTacticalPrompts = async (serviceContext: ServiceContext): Promise<string[]> => {
+    if (!serviceContext.serviceName) return [
+        "Empresas com avaliações ruins no Google Maps",
+        "Negócios sem website oficial",
+        "Lojas com Instagram desatualizado"
+    ];
+
+    const prompt = `
+        ATUE COMO UM ESTRATEGISTA DE PROSPECÇÃO B2B.
+        
+        SERVIÇO DO USUÁRIO: "${serviceContext.serviceName}"
+        DESCRIÇÃO: "${serviceContext.description}"
+        
+        TAREFA: Crie 3 instruções de busca ("Prompts Táticos") curtas e específicas para encontrar os leads PERFEITOS para esse serviço.
+        Foque em "Dores Visíveis" ou "Gatilhos de Compra".
+        
+        Exemplo (se fosse Venda de Sites):
+        1. "Apenas clínicas médicas que não possuem site cadastrado no Google Maps."
+        2. "Advogados com sites antigos (não responsivos) e fotos de baixa qualidade."
+        3. "Restaurantes com muitas reclamações sobre atendimento no delivery."
+        
+        SAÍDA: APENAS UM ARRAY JSON DE STRINGS.
+        ["Prompt 1", "Prompt 2", "Prompt 3"]
+        
+        IDIOMA: PORTUGUÊS DO BRASIL.
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: { responseMimeType: "application/json" }
+        });
+        const text = response.text || "[]";
+        return JSON.parse(text);
+    } catch (e) {
+        return [
+            "Empresas sem presença digital consolidada",
+            "Negócios com alta demanda mas site ruim",
+            "Empresas locais com perfil incompleto"
+        ];
+    }
+}
 
 /**
  * Gera Copy de Marketing Hiper-Personalizada (PT-BR)
@@ -454,7 +529,7 @@ export const generateNeuroSequence = async (serviceContext: ServiceContext): Pro
       TAREFA: Crie uma "SEQUÊNCIA DE RESGATE" de 5 mensagens para leads que pararam de responder (Ghosting).
       Use estes gatilhos obrigatórios:
       1. Dia 1: Reciprocidade/Valor (Entregar algo útil/dica rápida).
-      2. Dia 3: Curiosidade (Uma pergunta intrigante).
+      2. Dia 3: Curiosidade (Uma pergunta estranha).
       3. Dia 7: Prova Social (Citar outros resultados sem se gabar).
       4. Dia 15: Medo da Perda/Escassez (Falar que a agenda vai fechar).
       5. Dia 30: "Break-up" (Despedida educada para gerar reação).
@@ -519,8 +594,9 @@ export const runRoleplayTurn = async (
       SAÍDA ESPERADA (JSON):
       {
         "text": "Sua resposta como CLIENTE. Mantenha a personalidade difícil. Seja curto, como no WhatsApp.",
-        "feedback": "Seu feedback como COACH sobre a resposta do usuário. O que ele fez bem? O que errou? Como melhorar?",
-        "score": 0 a 10 (Nota para a resposta do usuário)
+        "feedback": "Seu feedback como COACH sobre a resposta do usuário. O que ele fez bem? O que errou?",
+        "score": 0 a 10 (Nota para a resposta do usuário),
+        "betterResponse": "Escreva aqui um EXEMPLO PRÁTICO de uma resposta PERFEITA que o usuário deveria ter enviado para lidar com esse tipo de cliente e avançar a venda."
       }
       
       IDIOMA: PORTUGUÊS DO BRASIL.
@@ -538,9 +614,60 @@ export const runRoleplayTurn = async (
             sender: 'ai',
             text: data.text || "...",
             feedback: data.feedback,
-            score: data.score
+            score: data.score,
+            betterResponse: data.betterResponse
         };
     } catch (e) {
         return { sender: 'ai', text: "Pode repetir? Não entendi.", feedback: "Erro na IA.", score: 0 };
+    }
+};
+
+/**
+ * AUTÓPSIA DE NEGOCIAÇÃO (Real-Time Chat Analysis)
+ */
+export const analyzeChatHistory = async (chatText: string, serviceContext: ServiceContext): Promise<ChatAnalysis> => {
+    const prompt = `
+        ATUE COMO UM ESTRATEGISTA DE VENDAS SÊNIOR (THE CLOSER).
+        
+        CONTEXTO:
+        O usuário está vendendo: "${serviceContext.serviceName}"
+        Abaixo está o histórico copiado e colado de uma conversa real de WhatsApp (pode estar bagunçado).
+        
+        CONVERSA REAL:
+        """
+        ${chatText.substring(0, 5000)}
+        """
+        
+        SUA MISSÃO:
+        Analise o que foi dito e o que NÃO foi dito.
+        
+        RETORNE UM JSON:
+        {
+          "score": 0 a 100, // Probabilidade real de fechar.
+          "sentiment": "positive" | "neutral" | "negative",
+          "hiddenIntent": "O que o cliente está realmente pensando? (ex: Ele diz que vai pensar, mas achou caro)",
+          "nextMove": "A MENSAGEM PERFEITA para mandar AGORA e destravar a venda.",
+          "tip": "Um conselho estratégico curto."
+        }
+        
+        IDIOMA: PORTUGUÊS DO BRASIL.
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: { responseMimeType: "application/json" }
+        });
+        return JSON.parse(response.text || "{}");
+    } catch (e) {
+        console.error(e);
+        return {
+            score: 0,
+            sentiment: 'neutral',
+            hiddenIntent: "Não foi possível analisar o texto.",
+            nextMove: "Tente retomar o contato perguntando se ficou alguma dúvida.",
+            tip: "Tente colar a conversa novamente."
+        };
     }
 };
