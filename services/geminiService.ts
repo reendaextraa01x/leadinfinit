@@ -196,23 +196,28 @@ export const generateLeads = async (
 };
 
 export const generateTacticalPrompts = async (serviceContext: ServiceContext): Promise<string[]> => {
+    // Fallback inteligente se não houver serviço configurado
     if (!serviceContext.serviceName) return [
-        "Empresas com avaliações ruins no Google Maps",
-        "Negócios sem website oficial",
-        "Lojas com Instagram desatualizado"
+        "Apenas empresas com avaliação menor que 4.0 no Google Maps",
+        "Negócios locais que não possuem site oficial nos resultados",
+        "Restaurantes com Instagram ativo mas sem link de pedidos na bio"
     ];
 
     const prompt = `
-        ATUE COMO UM ESTRATEGISTA DE PROSPECÇÃO B2B.
+        ATUE COMO UM ESPECIALISTA EM GOOGLE DORKING E PESQUISA AVANÇADA.
         
         SERVIÇO DO USUÁRIO: "${serviceContext.serviceName}"
         DESCRIÇÃO: "${serviceContext.description}"
         
-        TAREFA: Crie 3 instruções de busca ("Prompts Táticos") curtas e específicas para encontrar os leads PERFEITOS para esse serviço.
-        ORDENE PELA MELHOR IDEIA PRIMEIRO.
+        MISSÃO: Crie 3 instruções de "Mira Laser" (Filtros de Busca) para encontrar o cliente PERFEITO que tem a dor que esse serviço resolve.
         
-        SAÍDA: APENAS UM ARRAY JSON DE STRINGS.
-        ["A melhor ideia aqui", "Outra ideia boa", "Ideia alternativa"]
+        REGRAS:
+        1. As ideias devem ser ordens diretas para a IA de busca.
+        2. Foco em "Problemas Visíveis" (Ex: Sem site, reviews ruins, site lento).
+        3. ORDENE PELA MELHOR E MAIS LUCRATIVA IDEIA PRIMEIRO.
+        
+        SAÍDA ESPERADA (JSON ARRAY DE STRINGS):
+        ["Apenas clínicas de estética que não têm site e usam Linktree", "Empresas de engenharia com sites que não abrem no celular", "Advogados com menos de 10 avaliações no Google"]
         
         IDIOMA: PORTUGUÊS DO BRASIL.
     `;
@@ -221,12 +226,28 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
         const response: GenerateContentResponse = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: prompt,
-            config: { responseMimeType: "application/json" }
+            config: { 
+                responseMimeType: "application/json",
+                temperature: 0.8 
+            }
         });
+        
         const text = response.text || "[]";
-        return JSON.parse(text);
+        // Usa o extrator robusto para evitar quebras
+        const json = extractJson(text);
+        
+        return Array.isArray(json) ? json : [
+             "Apenas empresas com site quebrado ou fora do ar",
+             "Negócios com muitas reclamações recentes",
+             "Empresas invisíveis na primeira página do Google"
+        ];
     } catch (e) {
-        return [];
+        console.error("Erro ao gerar prompts táticos:", e);
+        return [
+             "Apenas empresas com site quebrado ou fora do ar",
+             "Negócios com muitas reclamações recentes",
+             "Empresas invisíveis na primeira página do Google"
+        ];
     }
 }
 

@@ -40,15 +40,22 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => 
             LEAD QUENTE
         </div>
       )}
+      
+      {/* Quality Badge - DIAMOND */}
+      {lead.qualityTier === 'high-ticket' && (
+         <div className="absolute -top-2 -left-2 bg-purple-600 text-white text-[10px] font-bold px-2 py-1 rounded-full flex items-center shadow-lg shadow-purple-500/30 z-20">
+            💎 HIGH TICKET
+        </div>
+      )}
 
       <div className="relative z-10">
         <div className="flex justify-between items-start mb-4">
-          <h3 className="text-xl font-bold text-white group-hover:text-accent transition-colors pr-2">
+          <h3 className="text-xl font-bold text-white group-hover:text-accent transition-colors pr-2 break-words max-w-[80%]">
             {lead.name}
           </h3>
           <button 
             onClick={() => onSave(lead)}
-            className={`p-2 rounded-full transition-colors ${isSaved ? 'bg-accent text-surface' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
+            className={`p-2 rounded-full transition-all transform active:scale-95 ${isSaved ? 'bg-accent text-surface shadow-[0_0_10px_rgba(6,182,212,0.5)]' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}`}
             title={isSaved ? "Salvo" : "Salvar Lead"}
           >
             <SaveIcon className="w-5 h-5" />
@@ -62,13 +69,13 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => 
                      <TargetIcon className="w-3 h-3 mr-1" />
                      Oportunidade Detectada
                  </div>
-                 <p className="text-xs text-slate-300 italic">
+                 <p className="text-xs text-slate-300 italic leading-relaxed">
                      "{lead.matchReason}"
                  </p>
              </div>
         )}
 
-        <p className="text-slate-400 text-sm mb-4 line-clamp-2">
+        <p className="text-slate-400 text-sm mb-4 line-clamp-3 min-h-[3em]">
           {lead.description}
         </p>
 
@@ -100,10 +107,10 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => 
                   href={`https://wa.me/${waNumber}`} 
                   target="_blank" 
                   rel="noreferrer"
-                  className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-900/20 py-2.5 rounded-lg transition-all text-xs font-bold uppercase tracking-wide transform active:scale-95"
+                  className="flex-1 flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white shadow-lg shadow-green-900/20 py-2.5 rounded-lg transition-all text-xs font-bold uppercase tracking-wide transform active:scale-95 animate-pulse-fast hover:animate-none"
                 >
                   <WhatsAppIcon className="w-4 h-4" />
-                  Chamar no Zap
+                  CHAMAR AGORA
                 </a>
               )}
             </div>

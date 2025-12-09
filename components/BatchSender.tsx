@@ -1,8 +1,7 @@
 
-
 import React, { useState } from 'react';
 import { Lead, ServiceContext, LeadStatus, ObjectionType, ChatAnalysis } from '../types';
-import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon, MicroscopeIcon, XIcon, LightBulbIcon } from './ui/Icons';
+import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon, MicroscopeIcon, XIcon, LightBulbIcon, SearchIcon } from './ui/Icons';
 import { generateMarketingCopy, generateLeadAudit, handleObjection, calculateInactionCost, analyzeChatHistory } from '../services/geminiService';
 
 interface BatchSenderProps {
@@ -79,6 +78,31 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
 
     if (hasChanges) setLeadStates(newStates);
   }, [savedLeads, serviceContext]);
+
+  // EMPTY STATE HANDLER
+  if (savedLeads.length === 0) {
+      return (
+          <div className="max-w-4xl mx-auto mt-20 text-center animate-fade-in px-4">
+              <div className="bg-surface border border-slate-800 rounded-2xl p-12 shadow-2xl relative overflow-hidden">
+                  <div className="absolute top-[-50%] left-[-10%] w-[150%] h-[150%] bg-gradient-to-b from-blue-900/10 via-transparent to-transparent pointer-events-none rounded-full blur-3xl"></div>
+                  
+                  <ColumnsIcon className="w-24 h-24 text-slate-700 mx-auto mb-6" />
+                  <h2 className="text-3xl font-black text-white mb-4">O Pipeline está vazio!</h2>
+                  <p className="text-slate-400 text-lg max-w-xl mx-auto mb-8">
+                      Para começar a vender, você precisa alimentar a máquina. Vá ao Buscador e encontre seus primeiros alvos.
+                  </p>
+                  
+                  <button 
+                    onClick={() => document.getElementById('tab-search-trigger')?.click()} // Hack simples para navegação via DOM ou user action
+                    className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-primary to-accent hover:from-primaryHover hover:to-cyan-400 text-white font-bold rounded-xl shadow-lg hover:shadow-cyan-500/25 transition-all transform hover:-translate-y-1"
+                  >
+                      <SearchIcon className="w-5 h-5 mr-2" />
+                      IR PARA O RADAR DE BUSCA
+                  </button>
+              </div>
+          </div>
+      );
+  }
 
   const handleGenerateAllMessages = async () => {
     setIsBulkGenerating(true);

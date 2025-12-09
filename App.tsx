@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import SearchInterface from './components/SearchInterface';
 import LeadCard from './components/LeadCard';
@@ -237,6 +238,7 @@ const App: React.FC = () => {
               Visão Geral
             </button>
             <button
+              id="tab-search-trigger" // ID for internal linking
               onClick={() => setActiveTab('search')}
               className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
                 activeTab === 'search' 
