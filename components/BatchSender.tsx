@@ -36,6 +36,7 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
   const [leadStates, setLeadStates] = useState<Record<string, LeadWithStatus>>({});
   const [useDesktopApp, setUseDesktopApp] = useState(false);
   const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+  const [isBulkAuditing, setIsBulkAuditing] = useState(false);
   
   // CHAT ANALYSIS STATE
   const [analysisModal, setAnalysisModal] = useState<{
@@ -79,7 +80,7 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
     if (hasChanges) setLeadStates(newStates);
   }, [savedLeads, serviceContext]);
 
-  const handleGenerateAll = async () => {
+  const handleGenerateAllMessages = async () => {
     setIsBulkGenerating(true);
     // Only generate for 'new' leads to save tokens/time
     const leadsToProcess = savedLeads.filter(l => l.status === 'new' && cleanPhone(l.phone));
@@ -94,6 +95,25 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
       }
     }
     setIsBulkGenerating(false);
+  };
+
+  const handleGenerateAllAudits = async () => {
+      setIsBulkAuditing(true);
+      // Filtra leads novos que AINDA NÃO têm auditoria
+      const leadsToProcess = savedLeads.filter(l => l.status === 'new' && !l.audit);
+
+      for (const lead of leadsToProcess) {
+          setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingAudit: true }}));
+          try {
+              const audit = await generateLeadAudit(lead, serviceContext);
+              onUpdateLead({ ...lead, audit: audit });
+          } catch (e) {
+              console.error(e);
+          } finally {
+              setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], isGeneratingAudit: false }}));
+          }
+      }
+      setIsBulkAuditing(false);
   };
 
   const handleSend = (lead: Lead, message: string) => {
@@ -291,16 +311,32 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
             Gerencie seu funil de vendas e use a <span className="text-accent font-bold">Auditoria Automática</span> para fechar mais contratos.
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
              <button
                onClick={() => setUseDesktopApp(!useDesktopApp)}
                className={`px-3 py-2 rounded-md text-xs font-bold transition-all border ${useDesktopApp ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400'}`}
              >
                Modo: {useDesktopApp ? 'App Desktop ⚡' : 'Web (Aba Única)'}
              </button>
-             <button onClick={handleGenerateAll} disabled={isBulkGenerating} className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold text-sm flex items-center shadow-lg">
+             
+             {/* BULK AUDIT BUTTON */}
+             <button 
+                onClick={handleGenerateAllAudits} 
+                disabled={isBulkAuditing} 
+                className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg font-bold text-sm flex items-center shadow-lg disabled:opacity-50 disabled:cursor-wait"
+            >
+                <DocumentReportIcon className={`w-4 h-4 mr-2 ${isBulkAuditing ? 'animate-spin' : ''}`} />
+                {isBulkAuditing ? 'Analisando...' : 'Gerar Auditorias em Massa'}
+             </button>
+
+             {/* BULK COPY BUTTON */}
+             <button 
+                onClick={handleGenerateAllMessages} 
+                disabled={isBulkGenerating} 
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg font-bold text-sm flex items-center shadow-lg disabled:opacity-50 disabled:cursor-wait"
+            >
                 <MagicIcon className={`w-4 h-4 mr-2 ${isBulkGenerating ? 'animate-spin' : ''}`} />
-                Gerar Copys em Massa
+                {isBulkGenerating ? 'Escrevendo...' : 'Gerar Copys em Massa'}
              </button>
         </div>
       </div>

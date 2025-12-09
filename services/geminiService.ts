@@ -6,14 +6,25 @@ import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadSta
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Helper para limpar JSON de blocos Markdown
+// Helper ROBUSTO para limpar JSON (Remove Markdown, Texto conversacional, etc)
 const extractJson = (text: string): any => {
   try {
-    const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```([\s\S]*?)```/);
-    const jsonString = jsonMatch ? jsonMatch[1] : text;
-    return JSON.parse(jsonString);
+    // 1. Tenta encontrar um bloco de código JSON explícito
+    const jsonBlockMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/```([\s\S]*?)```/);
+    if (jsonBlockMatch) {
+      return JSON.parse(jsonBlockMatch[1]);
+    }
+
+    // 2. Se não achar bloco, tenta encontrar o primeiro '[' e o último ']' (Array)
+    const arrayMatch = text.match(/\[[\s\S]*\]/);
+    if (arrayMatch) {
+      return JSON.parse(arrayMatch[0]);
+    }
+
+    // 3. Tenta parsear o texto direto (caso venha limpo)
+    return JSON.parse(text);
   } catch (e) {
-    console.error("Falha ao processar JSON da IA:", text);
+    console.error("Falha crítica ao processar JSON da IA. Texto recebido:", text);
     return null;
   }
 };
@@ -57,7 +68,7 @@ export const generateLeads = async (
     O USUÁRIO VENDE: "${serviceContext.serviceName}"
     DESCRIÇÃO DA OFERTA: "${serviceContext.description}"
     
-    SUA MISSÃO: Encontrar empresas com UMA DOR ESPECÍFICA que este serviço resolve.
+    SUA MISSÃO: Usar o Google Search para encontrar empresas reais com UMA DOR ESPECÍFICA que este serviço resolve.
     Exemplos do que buscar:
     - Se vende SITES -> Busque empresas SEM SITE, com sites QUEBRADOS ou FEIOS/ANTIGOS.
     - Se vende TRÁFEGO -> Busque empresas invisíveis no Google ou com pouco engajamento.
@@ -68,7 +79,7 @@ export const generateLeads = async (
   } else {
     serviceStrategy = `
     >>> MODO CAÇADOR ATIVADO <<<
-    Encontre empresas que pareçam precisar de Modernização Digital (Sem site, marca antiga, poucas avaliações).
+    Encontre empresas reais que pareçam precisar de Modernização Digital (Sem site, marca antiga, poucas avaliações).
     `;
   }
 
@@ -76,7 +87,7 @@ export const generateLeads = async (
   let advancedFilters = "";
   if (filters) {
       if (filters.websiteRule === 'must_have') advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter um website ativo.\n";
-      if (filters.websiteRule === 'must_not_have') advancedFilters += "- OBRIGATÓRIO: O lead NÃO PODE ter website (ou deve estar quebrado).\n";
+      if (filters.websiteRule === 'must_not_have') advancedFilters += "- OBRIGATÓRIO: O lead NÃO PODE ter website (ou deve estar quebrado/404).\n";
       if (filters.mustHaveInstagram) advancedFilters += "- OBRIGATÓRIO: O lead DEVE ter perfil no Instagram.\n";
       if (filters.mobileOnly) advancedFilters += "- OBRIGATÓRIO: Priorize números de celular/WhatsApp ((XX) 9...).\n";
   }
@@ -85,7 +96,7 @@ export const generateLeads = async (
   let laserScope = "";
   if (customInstruction) {
       laserScope = `
-      >>> ORDEM PRIORITÁRIA (MIRA LASER) <<<
+      >>> ORDEM PRIORITÁRIA (MIRA LASER - CRÍTICO) <<<
       O usuário definiu uma regra específica de busca. SIGA ISSO ACIMA DE TUDO:
       "${customInstruction}"
       `;
@@ -96,6 +107,7 @@ export const generateLeads = async (
 
   const prompt = `
     ATUE COMO UM SISTEMA DE INTELIGÊNCIA DE VENDAS DE ELITE (Focado no Brasil).
+    USE A FERRAMENTA DE BUSCA DO GOOGLE AGORA.
     
     ALVO:
     - Nicho: "${niche}"
@@ -109,7 +121,7 @@ export const generateLeads = async (
     ${laserScope}
     
     REQUISITOS OBRIGATÓRIOS:
-    1. ENCONTRE ${requestCount} LEADS POTENCIAIS.
+    1. ENCONTRE ${requestCount} LEADS REAIS (Empresas que existem).
     2. *** REGRA DO TELEFONE ***: Você DEVE encontrar um número válido (Preferência Celular/WhatsApp). Se não tiver telefone, NÃO INCLUA.
     3. EXCLUA estes nomes já existentes: ${existingNames.join(", ")}.
     4. IDIOMA: TODA A SAÍDA DEVE SER EM PORTUGUÊS DO BRASIL (PT-BR).
@@ -118,10 +130,10 @@ export const generateLeads = async (
     
     PARA CADA LEAD, IDENTIFIQUE:
     - "painPoints": Lista de problemas detectados (Ex: ["Sem Site", "Avaliação Baixa", "Instagram Inativo"]). EM PORTUGUÊS.
-    - "matchReason": Uma frase curta e persuasiva do porquê esse lead vai comprar. (Ex: "Tem 5k seguidores mas sem link na bio - perdendo vendas."). EM PORTUGUÊS.
+    - "matchReason": Uma frase curta e persuasiva do porquê esse lead vai comprar. EM PORTUGUÊS.
     - "qualityTier": Classifique o poder de compra: 'opportunity' (Pequeno/Iniciante), 'high-ticket' (Estabelecido/Rico), 'urgent' (Com problemas críticos).
 
-    Formato de Saída: APENAS ARRAY JSON dentro de um bloco de código.
+    IMPORTANTE: RETORNE APENAS O ARRAY JSON. NÃO ESCREVA NADA ANTES NEM DEPOIS.
     [
       {
         "name": "Nome do Negócio",
@@ -142,7 +154,7 @@ export const generateLeads = async (
       contents: prompt,
       config: {
         tools: [{ googleSearch: {} }],
-        temperature: 0.7, // Temperatura menor para resposta mais rápida e direta
+        temperature: 0.7, // Equilíbrio entre criatividade e precisão
       },
     });
 
@@ -158,7 +170,8 @@ export const generateLeads = async (
     }
 
     if (!Array.isArray(rawLeads)) {
-      throw new Error("A IA não retornou uma lista válida.");
+      console.warn("IA não retornou array válido. Texto:", text);
+      throw new Error("Formato de resposta inválido. Tente novamente.");
     }
 
     // Mapeamento, Limpeza e FILTRO RIGOROSO
@@ -188,7 +201,8 @@ export const generateLeads = async (
 
   } catch (error) {
     console.error("Erro na busca Gemini:", error);
-    throw error;
+    // Retorna vazio para a UI tratar sem quebrar a app inteira
+    return { leads: [], sources: [] }; 
   }
 };
 
@@ -209,7 +223,7 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
         DESCRIÇÃO: "${serviceContext.description}"
         
         TAREFA: Crie 3 instruções de busca ("Prompts Táticos") curtas e específicas para encontrar os leads PERFEITOS para esse serviço.
-        Foque em "Dores Visíveis" ou "Gatilhos de Compra".
+        ORDENE PELA MELHOR IDEIA PRIMEIRO.
         
         Exemplo (se fosse Venda de Sites):
         1. "Apenas clínicas médicas que não possuem site cadastrado no Google Maps."
@@ -217,7 +231,7 @@ export const generateTacticalPrompts = async (serviceContext: ServiceContext): P
         3. "Restaurantes com muitas reclamações sobre atendimento no delivery."
         
         SAÍDA: APENAS UM ARRAY JSON DE STRINGS.
-        ["Prompt 1", "Prompt 2", "Prompt 3"]
+        ["A melhor ideia aqui", "Outra ideia boa", "Ideia alternativa"]
         
         IDIOMA: PORTUGUÊS DO BRASIL.
     `;
@@ -395,32 +409,31 @@ export const generateServiceInsights = async (serviceName: string, description: 
 };
 
 /**
- * Gera Diferencial Matador / Oferta Grand Slam
+ * Gera Diferencial Matador / Oferta Grand Slam (VERSÃO EXCLUSIVA E ÚNICA)
  */
 export const generateKillerDifferential = async (serviceName: string, currentDescription: string): Promise<string> => {
     const prompt = `
-      ATUE COMO ALEX HORMOZI (Expert em Ofertas).
-      
-      SERVIÇO DE ENTRADA: "${serviceName}"
-      DESCRIÇÃO ATUAL: "${currentDescription}"
-      
-      TAREFA: Reescreva a descrição do serviço transformando-a em uma "OFERTA GRAND SLAM" (Alto Valor, Baixo Risco, Alta Urgência).
-      
-      FÓRMULA: 
-      1. Resultado dos Sonhos (O que eles querem de verdade, não a ferramenta).
-      2. Probabilidade de Sucesso (Prova social/Garantia).
-      3. Tempo (Resultados rápidos).
-      4. Esforço (Feito para você).
-      
-      REQUISITOS:
-      - DEVE incluir uma GARANTIA OUSADA (Reversão de Risco).
-      - DEVE soar Surpreendente e "Bom demais pra ser verdade" (mas real).
-      - IDIOMA: PORTUGUÊS DO BRASIL. Copy persuasiva.
-      
-      Exemplo Entrada: "Faço sites"
-      Exemplo Saída: "Eu crio uma Máquina de Vendas 24h para sua empresa. Entrego seu site pronto em 7 dias ou devolvo seu dinheiro + R$ 500 pelo atraso. Tudo incluso."
-      
-      SAÍDA APENAS O TEXTO DA NOVA OFERTA. SEM EXPLICAÇÕES.
+      ATUE COMO UM ENGENHEIRO DE OFERTAS DE ELITE (Nível Alex Hormozi/Russell Brunson).
+
+      CONTEXTO:
+      O usuário vende: "${serviceName}"
+      Detalhes/Diferencial atual: "${currentDescription}"
+
+      OBJETIVO:
+      Transformar isso em uma "OFERTA ÚNICA E EXCLUSIVA". Não quero algo genérico como "Melhoro seus resultados".
+      Quero uma promessa tangível, com um NOME DE MÉTODO PROPRIETÁRIO e uma GARANTIA INSANA.
+
+      ESTRUTURA OBRIGATÓRIA DA RESPOSTA:
+      1. Headline (Gancho): "Eu ajudo [Nicho] a [Resultado Sonhado] em [Tempo] sem [Esforço/Dor] usando o [Nome do Método Criado]."
+      2. O Mecanismo Único: Dê um nome sexy para o processo (ex: "Protocolo Escala 3X", "Sistema Site-Relâmpago", "Funil de Conversão Infinita").
+      3. A Garantia (Risk Reversal): Algo doloroso para o vendedor se falhar (ex: "Se não dobrar leads, eu trabalho de graça até dobrar" ou "Devolvo o dinheiro + R$ 500").
+
+      REGRAS DE OURO:
+      - ANALISE O INPUT: Se ele diz "site rápido", crie "Carregamento Instantâneo". Se ele diz "design", crie "Design de Conversão".
+      - EXCLUSIVIDADE: Use palavras que denotem propriedade (Meu sistema, Método exclusivo).
+      - IDIOMA: Português do Brasil (Copywriting Persuasivo).
+
+      SAÍDA: Combine tudo em um texto fluido e poderoso de 2 ou 3 frases.
     `;
     
     try {
@@ -430,7 +443,7 @@ export const generateKillerDifferential = async (serviceName: string, currentDes
         });
         return response.text?.trim() || "";
     } catch (e) {
-        return "Crio uma infraestrutura digital completa para seu negócio. Se não gerar resultado em 30 dias, eu devolvo seu investimento integralmente.";
+        return "Eu implemento o 'Protocolo de Presença Digital 360'. Transformo visitantes em clientes pagantes em menos de 7 dias com minha estrutura proprietária. Se não gerar resultado no primeiro mês, devolvo 100% do seu investimento.";
     }
 };
 

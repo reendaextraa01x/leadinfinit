@@ -73,6 +73,10 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
       try {
           const prompts = await generateTacticalPrompts(serviceContext);
           setSuggestedPrompts(prompts);
+          // AUTO-FILL BEST IDEA
+          if (prompts.length > 0) {
+              setCustomInstruction(prompts[0]);
+          }
       } catch (e) {
           console.error(e);
       } finally {
@@ -296,7 +300,9 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
                                         key={idx}
                                         type="button"
                                         onClick={() => setCustomInstruction(prompt)}
-                                        className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700 transition-colors text-left"
+                                        className={`text-[10px] px-2 py-1 rounded border transition-colors text-left
+                                            ${customInstruction === prompt ? 'bg-accent/20 border-accent text-white' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'}
+                                        `}
                                     >
                                         "{prompt}"
                                     </button>
