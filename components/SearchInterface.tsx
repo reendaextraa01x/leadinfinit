@@ -1,12 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { SearchIcon } from './ui/Icons';
-import { BusinessSize } from '../types';
+import { SearchIcon, HistoryIcon, TrashIcon } from './ui/Icons';
+import { BusinessSize, SearchHistoryItem } from '../types';
 
 interface SearchInterfaceProps {
   onSearch: (niche: string, location: string, size: BusinessSize, count: number) => void;
   isLoading: boolean;
   progress: number;
+  history: SearchHistoryItem[];
+  onClearHistory: () => void;
 }
 
 const TOP_NICHES = [
@@ -22,7 +24,7 @@ const TOP_NICHES = [
   "Restaurantes"
 ];
 
-const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, progress }) => {
+const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, progress, history, onClearHistory }) => {
   const [niche, setNiche] = useState('');
   const [location, setLocation] = useState('');
   const [size, setSize] = useState<BusinessSize>('small');
@@ -44,6 +46,13 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
     if (niche.trim() && location.trim()) {
       onSearch(niche, location, size, count);
     }
+  };
+
+  const handleHistoryClick = (item: SearchHistoryItem) => {
+    setNiche(item.niche);
+    setLocation(item.location);
+    setSize(item.size);
+    // Don't auto submit, let user adjust count if needed
   };
 
   // Estimate time: roughly 2.5s per lead requested + 2s overhead
@@ -186,27 +195,57 @@ const SearchInterface: React.FC<SearchInterfaceProps> = ({ onSearch, isLoading, 
         </div>
       </form>
 
-      {/* Top Niches Quick Select */}
-      <div className="mt-6 animate-fade-in" style={{ animationDelay: '200ms' }}>
-         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 ml-1">Nichos em Alta (Selecione um):</p>
-         <div className="flex flex-wrap gap-2">
-            {TOP_NICHES.map((presetNiche) => (
-               <button
-                  key={presetNiche}
-                  onClick={() => setNiche(presetNiche)}
-                  disabled={isLoading}
-                  className={`
-                    px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-200
-                    ${niche === presetNiche 
-                      ? 'bg-accent/20 border-accent text-accent shadow-[0_0_10px_rgba(6,182,212,0.2)]' 
-                      : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800'
-                    }
-                  `}
-               >
-                 {presetNiche}
-               </button>
-            ))}
-         </div>
+      <div className="flex flex-col md:flex-row gap-8 mt-6">
+          {/* Top Niches */}
+          <div className="flex-1 animate-fade-in" style={{ animationDelay: '200ms' }}>
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 ml-1">Nichos em Alta:</p>
+            <div className="flex flex-wrap gap-2">
+                {TOP_NICHES.slice(0, 6).map((presetNiche) => (
+                  <button
+                      key={presetNiche}
+                      onClick={() => setNiche(presetNiche)}
+                      disabled={isLoading}
+                      className={`
+                        px-3 py-1.5 rounded-full text-xs font-medium border transition-all duration-200
+                        ${niche === presetNiche 
+                          ? 'bg-accent/20 border-accent text-accent' 
+                          : 'bg-slate-800/50 border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 hover:bg-slate-800'
+                        }
+                      `}
+                  >
+                    {presetNiche}
+                  </button>
+                ))}
+            </div>
+          </div>
+
+          {/* Recent History */}
+          {history.length > 0 && (
+             <div className="flex-1 animate-fade-in" style={{ animationDelay: '300ms' }}>
+                 <div className="flex justify-between items-center mb-3 ml-1 pr-1">
+                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Histórico Recente:</p>
+                     <button onClick={onClearHistory} className="text-[10px] text-slate-600 hover:text-red-400 flex items-center transition-colors">
+                        <TrashIcon className="w-3 h-3 mr-1" /> Limpar
+                     </button>
+                 </div>
+                 <div className="space-y-2">
+                    {history.slice(0, 3).map((item, idx) => (
+                      <div 
+                        key={idx}
+                        onClick={() => handleHistoryClick(item)}
+                        className="flex items-center justify-between p-2 bg-slate-900/40 border border-slate-800 rounded-lg hover:border-slate-600 hover:bg-slate-800 cursor-pointer transition-all group"
+                      >
+                         <div className="flex items-center">
+                            <HistoryIcon className="w-3 h-3 text-slate-500 mr-2 group-hover:text-accent" />
+                            <span className="text-xs text-slate-300 font-medium mr-2">{item.niche}</span>
+                            <span className="text-[10px] text-slate-500">em {item.location}</span>
+                         </div>
+                         <span className="text-[9px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-500 border border-slate-700 capitalize">{item.size === 'small' ? 'Pequeno' : item.size === 'medium' ? 'Médio' : 'Grande'}</span>
+                      </div>
+                    ))}
+                 </div>
+             </div>
+          )}
       </div>
       
     </div>

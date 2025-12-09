@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Lead } from '../types';
-import { InstagramIcon, PhoneIcon, GlobeIcon, WhatsAppIcon, SaveIcon } from './ui/Icons';
+import { InstagramIcon, PhoneIcon, GlobeIcon, WhatsAppIcon, SaveIcon, FireIcon } from './ui/Icons';
 
 interface LeadCardProps {
   lead: Lead;
@@ -23,6 +23,7 @@ const cleanPhone = (phone: string): string | null => {
 const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => {
   const waNumber = cleanPhone(lead.phone);
   const hasValidPhone = lead.phone && lead.phone !== "Não encontrado";
+  const isHot = lead.score === 'hot';
 
   return (
     <div 
@@ -31,6 +32,14 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => 
     >
       {/* Glow Effect */}
       <div className="absolute inset-0 bg-gradient-to-r from-accent/5 to-primary/5 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+      {/* Hot Badge */}
+      {isHot && (
+        <div className="absolute -top-2 -right-2 bg-orange-600 text-white text-[10px] font-bold px-2 py-1 rounded-full flex items-center shadow-lg shadow-orange-500/30 z-20 animate-pulse">
+            <FireIcon className="w-3 h-3 mr-1" />
+            HOT LEAD
+        </div>
+      )}
 
       <div className="relative z-10">
         <div className="flex justify-between items-start mb-4">
@@ -108,11 +117,6 @@ const LeadCard: React.FC<LeadCardProps> = ({ lead, index, onSave, isSaved }) => 
             )}
           </div>
         </div>
-      </div>
-      
-      {/* Decorative Index */}
-      <div className="absolute top-4 right-14 text-sm font-bold bg-slate-800 px-2 py-1 rounded text-slate-400">
-        #{(index + 1).toString().padStart(2, '0')}
       </div>
     </div>
   );

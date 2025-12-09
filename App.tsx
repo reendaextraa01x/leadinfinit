@@ -4,11 +4,12 @@ import SearchInterface from './components/SearchInterface';
 import LeadCard from './components/LeadCard';
 import BatchSender from './components/BatchSender';
 import ServiceConfig from './components/ServiceConfig';
+import Dashboard from './components/Dashboard';
 import { generateLeads } from './services/geminiService';
-import { Lead, GroundingSource, BusinessSize, ServiceContext } from './types';
-import { DownloadIcon, UsersIcon, SearchIcon, WhatsAppIcon, SettingsIcon } from './components/ui/Icons';
+import { Lead, GroundingSource, BusinessSize, ServiceContext, SearchHistoryItem } from './types';
+import { DownloadIcon, SearchIcon, WhatsAppIcon, SettingsIcon, HomeIcon } from './components/ui/Icons';
 
-type Tab = 'search' | 'saved' | 'config';
+type Tab = 'dashboard' | 'search' | 'saved' | 'config';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('search');
@@ -20,19 +21,56 @@ const App: React.FC = () => {
   const [progress, setProgress] = useState(0); // Progress percentage 0-100
   const [error, setError] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useState<{ niche: string, location: string, size: BusinessSize, count: number } | null>(null);
-
-  // Saved/Batch State
+  
+  // Persistent State
   const [savedLeads, setSavedLeads] = useState<Lead[]>([]);
-
-  // Service Context State
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
+  const [totalGeneratedCount, setTotalGeneratedCount] = useState<number>(0);
   const [serviceContext, setServiceContext] = useState<ServiceContext>({
     serviceName: '',
     description: '',
-    targetAudience: ''
+    targetAudience: '',
+    ticketValue: 1500
   });
 
   const resultsRef = useRef<HTMLDivElement>(null);
   const progressIntervalRef = useRef<number | null>(null);
+
+  // --- LOCAL STORAGE PERSISTENCE ---
+  useEffect(() => {
+    // Load from LocalStorage on Mount
+    try {
+        const storedSavedLeads = localStorage.getItem('leadinfinit_saved');
+        const storedContext = localStorage.getItem('leadinfinit_context');
+        const storedHistory = localStorage.getItem('leadinfinit_history');
+        const storedCount = localStorage.getItem('leadinfinit_total_count');
+
+        if (storedSavedLeads) setSavedLeads(JSON.parse(storedSavedLeads));
+        if (storedContext) setServiceContext(JSON.parse(storedContext));
+        if (storedHistory) setSearchHistory(JSON.parse(storedHistory));
+        if (storedCount) setTotalGeneratedCount(parseInt(storedCount));
+    } catch (e) {
+        console.error("Failed to load local storage", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Save to LocalStorage on Change
+    localStorage.setItem('leadinfinit_saved', JSON.stringify(savedLeads));
+  }, [savedLeads]);
+
+  useEffect(() => {
+    localStorage.setItem('leadinfinit_context', JSON.stringify(serviceContext));
+  }, [serviceContext]);
+
+  useEffect(() => {
+    localStorage.setItem('leadinfinit_history', JSON.stringify(searchHistory));
+  }, [searchHistory]);
+
+  useEffect(() => {
+    localStorage.setItem('leadinfinit_total_count', totalGeneratedCount.toString());
+  }, [totalGeneratedCount]);
+
 
   const startProgressSimulation = (estimatedSeconds: number) => {
     setProgress(0);
@@ -60,6 +98,16 @@ const App: React.FC = () => {
     setIsSearching(true);
     setError(null);
     
+    // Update History (only if new search)
+    if (!append) {
+        const newHistoryItem: SearchHistoryItem = { niche, location, size, timestamp: Date.now() };
+        setSearchHistory(prev => {
+            // Remove duplicates and keep top 10
+            const filtered = prev.filter(item => !(item.niche === niche && item.location === location && item.size === size));
+            return [newHistoryItem, ...filtered].slice(0, 10);
+        });
+    }
+
     // Estimate roughly 2.5s per lead + some overhead.
     const estimatedSeconds = (count * 2.5) + 2; 
     startProgressSimulation(estimatedSeconds);
@@ -81,6 +129,7 @@ const App: React.FC = () => {
       } else {
         setLeads(prev => append ? [...prev, ...newLeads] : newLeads);
         setSources(prev => append ? [...prev, ...newSources] : newSources);
+        setTotalGeneratedCount(prev => prev + newLeads.length);
         
         if (!append && resultsRef.current) {
           setTimeout(() => {
@@ -113,16 +162,26 @@ const App: React.FC = () => {
       if (exists) {
         return prev.filter(l => l.id !== lead.id);
       } else {
-        return [...prev, lead];
+        // Ensure status and score are set when saving if they aren't already
+        const leadToSave = { 
+            ...lead, 
+            status: lead.status || 'new',
+            score: lead.score || 'warm'
+        };
+        return [...prev, leadToSave];
       }
     });
+  };
+  
+  const updateLeadInSaved = (updatedLead: Lead) => {
+      setSavedLeads(prev => prev.map(l => l.id === updatedLead.id ? updatedLead : l));
   };
 
   const exportCSV = () => {
     const listToExport = activeTab === 'search' ? leads : savedLeads;
     if (listToExport.length === 0) return;
     
-    const headers = ['Nome', 'Telefone', 'Instagram', 'Site', 'Descrição'];
+    const headers = ['Nome', 'Telefone', 'Instagram', 'Site', 'Descrição', 'Status', 'Pontuação'];
     const csvContent = [
       headers.join(','),
       ...listToExport.map(lead => [
@@ -130,7 +189,9 @@ const App: React.FC = () => {
         `"${lead.phone}"`,
         `"${lead.instagram || ''}"`,
         `"${lead.website || ''}"`,
-        `"${lead.description.replace(/"/g, '""')}"`
+        `"${lead.description.replace(/"/g, '""')}"`,
+        `"${lead.status || 'new'}"`,
+        `"${lead.score || 'warm'}"`
       ].join(','))
     ].join('\n');
 
@@ -169,6 +230,17 @@ const App: React.FC = () => {
         {/* Tab Navigation - BLOCKED WHEN SEARCHING */}
         <div className={`flex flex-wrap justify-center mb-10 gap-2 transition-all duration-300 ${isSearching ? 'pointer-events-none opacity-50 grayscale' : ''}`}>
           <div className="bg-surface/50 p-1 rounded-xl border border-slate-800 flex flex-wrap gap-2 backdrop-blur-sm">
+             <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
+                activeTab === 'dashboard' 
+                  ? 'bg-slate-700 text-white shadow-lg shadow-slate-900/25 border border-slate-600' 
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              <HomeIcon className="w-4 h-4 mr-2" />
+              Visão Geral
+            </button>
             <button
               onClick={() => setActiveTab('search')}
               className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
@@ -189,7 +261,7 @@ const App: React.FC = () => {
               }`}
             >
               <WhatsAppIcon className="w-4 h-4 mr-2" />
-              Lista de Disparo
+              CRM Pipeline
               {savedLeads.length > 0 && (
                 <span className="ml-2 bg-white/20 px-2 py-0.5 rounded-full text-xs">
                   {savedLeads.length}
@@ -215,6 +287,16 @@ const App: React.FC = () => {
 
         {/* Main Content Area */}
         <div className="min-h-[500px]">
+          
+          {activeTab === 'dashboard' && (
+             <Dashboard 
+                savedLeads={savedLeads} 
+                totalLeadsGenerated={totalGeneratedCount} 
+                serviceContext={serviceContext}
+                onUpdateTicketValue={(val) => setServiceContext(prev => ({ ...prev, ticketValue: val }))}
+             />
+          )}
+
           {activeTab === 'search' && (
             <>
               {/* Search */}
@@ -222,6 +304,8 @@ const App: React.FC = () => {
                 onSearch={(n, l, s, c) => handleSearch(n, l, s, c, false)} 
                 isLoading={isSearching} 
                 progress={progress}
+                history={searchHistory}
+                onClearHistory={() => setSearchHistory([])}
               />
 
               {/* Error State */}
@@ -234,7 +318,7 @@ const App: React.FC = () => {
 
               {/* Results */}
               {leads.length > 0 && (
-                <div ref={resultsRef} className="max-w-7xl mx-auto">
+                <div ref={resultsRef} className="max-w-7xl mx-auto animate-fade-in">
                   <div className="flex justify-between items-center mb-8">
                     <div>
                       <h2 className="text-3xl font-bold text-white">
@@ -321,6 +405,7 @@ const App: React.FC = () => {
               serviceContext={serviceContext}
               onRemove={(id) => setSavedLeads(prev => prev.filter(l => l.id !== id))}
               onClear={() => setSavedLeads([])}
+              onUpdateLead={updateLeadInSaved}
             />
           )}
 

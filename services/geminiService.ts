@@ -1,5 +1,6 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { Lead, GroundingSource, BusinessSize, ServiceContext } from "../types";
+import { Lead, GroundingSource, BusinessSize, ServiceContext, LeadScore, LeadStatus, ServiceInsights } from "../types";
 
 // @ts-ignore: O Vite substitui process.env.API_KEY no build, mas o TSC reclama. Ignoramos o erro.
 const apiKey = process.env.API_KEY;
@@ -24,6 +25,19 @@ const cleanPhone = (phone: string): string | null => {
   const cleaned = phone.replace(/\D/g, '');
   if (cleaned.length < 8) return null; // Too short to be valid
   return cleaned;
+};
+
+// Calculate 'Lead Temperature'
+const calculateLeadScore = (lead: any): LeadScore => {
+    // Logic: No website or Broken Website = HOT Opportunity for web services
+    if (!lead.website || lead.website === "Not Found") {
+        return 'hot';
+    }
+    // Has website but also has Instagram (Means they are trying but might need optimization)
+    if (lead.instagram) {
+        return 'warm';
+    }
+    return 'cold';
 };
 
 export const generateLeads = async (
@@ -135,7 +149,9 @@ export const generateLeads = async (
         instagram: (item.instagram === "Not Found" || !item.instagram) ? null : item.instagram,
         description: item.description || "Sem descrição disponível.",
         website: (item.website === "Not Found" || !item.website) ? undefined : item.website,
-        confidenceScore: 1
+        confidenceScore: 1,
+        status: 'new' as LeadStatus,
+        score: calculateLeadScore(item) // Calculate Hot/Warm
       }))
       // THE FILTER: Remove anything that doesn't have a valid phone number
       .filter((lead) => {
@@ -214,5 +230,88 @@ export const generateMarketingCopy = async (
   } catch (error) {
     console.error("Copy generation error", error);
     return `Fala ${lead.name}, vi aqui que vocês estão deixando dinheiro na mesa sem um site profissional. Bora resolver isso hoje?`;
+  }
+};
+
+/**
+ * Generates a Technical Audit (The Secret Weapon)
+ */
+export const generateLeadAudit = async (lead: Lead, serviceContext: ServiceContext): Promise<string> => {
+    const prompt = `
+        ACT AS AN EXPERT AUDITOR FOR: ${serviceContext.serviceName || "Digital Marketing"}.
+        TARGET: ${lead.name} (${lead.description}).
+        
+        TASK: Create a mini "Technical Audit" finding 3 SPECIFIC PROBLEMS with their digital presence that justify buying the user's service.
+        If they have no website, Focus heavily on that.
+        If they have a website (${lead.website || 'none'}), assume typical errors (speed, mobile, seo).
+        
+        FORMAT:
+        1. ❌ [Problem 1]
+        2. ❌ [Problem 2]
+        3. ❌ [Problem 3]
+        
+        Language: Portuguese (Brazil). Professional, authoritative, but shocking.
+        Keep it concise. Max 3 bullet points.
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt
+        });
+        return response.text?.trim() || "";
+    } catch (e) {
+        return "1. ❌ Site não encontrado ou lento.\n2. ❌ Perfil do Google desatualizado.\n3. ❌ Ausência de funil de vendas.";
+    }
+}
+
+/**
+ * Generates Strategic Insights based on the user's service.
+ */
+export const generateServiceInsights = async (serviceName: string, description: string): Promise<ServiceInsights> => {
+  const prompt = `
+    Act as a World-Class Business Strategist & Sales Consultant.
+    
+    The User sells the following service:
+    Name: "${serviceName}"
+    Description: "${description}"
+
+    YOUR TASK:
+    Analyze this service and determine the absolute BEST market strategy for high-ticket sales.
+    
+    1. Identify the ONE best niche industry to target (e.g., "Dentistas de Alto Padrão", "Corretores de Imóveis de Luxo").
+    2. Estimate a recommended HIGH-TICKET price in BRL (R$) that this specific niche can afford.
+    3. Explain WHY this niche is the perfect fit (the pain point).
+    4. Describe the financial potential (Why is it lucrative?).
+
+    Output format: JSON ONLY.
+    {
+      "recommendedNiche": "Industry Name",
+      "suggestedTicket": 2500,
+      "reasoning": "Explanation of why this niche needs this service urgently...",
+      "potential": "Explanation of the market size and opportunity..."
+    }
+  `;
+
+  try {
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json"
+      }
+    });
+    
+    const text = response.text || "";
+    return JSON.parse(text);
+  } catch (error) {
+    console.error("Strategy Insight Error", error);
+    // Fallback
+    return {
+      recommendedNiche: "Negócios Locais",
+      suggestedTicket: 1500,
+      reasoning: "Todos os negócios precisam de presença digital.",
+      potential: "Alta demanda em todas as cidades."
+    };
   }
 };
