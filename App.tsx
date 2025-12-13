@@ -1,5 +1,4 @@
-
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, Component, ErrorInfo, PropsWithChildren } from 'react';
 import SearchInterface from './components/SearchInterface';
 import LeadCard from './components/LeadCard';
 import BatchSender from './components/BatchSender';
@@ -9,18 +8,75 @@ import SalesLab from './components/SalesLab';
 import Tutorial from './components/Tutorial';
 import { generateLeads } from './services/geminiService';
 import { Lead, GroundingSource, BusinessSize, ServiceContext, SearchHistoryItem, SearchFilters } from './types';
-import { DownloadIcon, SearchIcon, WhatsAppIcon, SettingsIcon, HomeIcon, BrainIcon, BookOpenIcon } from './components/ui/Icons';
+import { DownloadIcon, SearchIcon, WhatsAppIcon, SettingsIcon, HomeIcon, BrainIcon, BookOpenIcon, TrashIcon, SaveIcon } from './components/ui/Icons';
+
+// --- ERROR BOUNDARY ---
+interface ErrorBoundaryProps extends PropsWithChildren {}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = { hasError: false, error: null };
+
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Critical App Crash:", error, errorInfo);
+  }
+
+  handleHardReset = () => {
+    if (confirm("Isso apagará seus dados salvos para recuperar o sistema. Continuar?")) {
+        localStorage.clear();
+        window.location.reload();
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#0B0F19] flex items-center justify-center p-4">
+          <div className="bg-[#121826] border border-red-900/50 rounded-2xl p-8 max-w-lg text-center shadow-2xl">
+            <div className="w-16 h-16 bg-red-900/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                <TrashIcon className="w-8 h-8 text-red-500" />
+            </div>
+            <h1 className="text-2xl font-black text-white mb-2">Falha no Sistema Detectada</h1>
+            <p className="text-slate-400 mb-6 text-sm">
+                Uma atualização recente ou dados corrompidos causaram um erro crítico.
+            </p>
+            <button 
+                onClick={this.handleHardReset}
+                className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg transition-colors shadow-lg"
+            >
+                REINICIAR SISTEMA (HARD RESET)
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 type Tab = 'dashboard' | 'search' | 'saved' | 'config' | 'lab' | 'tutorial';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('search');
   
   // Search State
   const [leads, setLeads] = useState<Lead[]>([]);
   const [sources, setSources] = useState<GroundingSource[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [progress, setProgress] = useState(0); // Progress percentage 0-100
+  const [progress, setProgress] = useState(0); 
   const [error, setError] = useState<string | null>(null);
   const [searchParams, setSearchParams] = useState<{ niche: string, location: string, size: BusinessSize, count: number, filters?: SearchFilters, customInstruction?: string } | null>(null);
   
@@ -32,58 +88,67 @@ const App: React.FC = () => {
     serviceName: '',
     description: '',
     targetAudience: '',
-    ticketValue: 1500
+    ticketValue: 1500,
+    templates: [] 
   });
-
+  
   const resultsRef = useRef<HTMLDivElement>(null);
   const progressIntervalRef = useRef<number | null>(null);
 
-  // --- LOCAL STORAGE PERSISTENCE ---
+  // --- REMOÇÃO SEGURA DO LOADER ---
   useEffect(() => {
-    try {
-        const storedSavedLeads = localStorage.getItem('leadinfinit_saved');
-        const storedContext = localStorage.getItem('leadinfinit_context');
-        const storedHistory = localStorage.getItem('leadinfinit_history');
-        const storedCount = localStorage.getItem('leadinfinit_total_count');
-
-        if (storedSavedLeads) setSavedLeads(JSON.parse(storedSavedLeads));
-        if (storedContext) setServiceContext(JSON.parse(storedContext));
-        if (storedHistory) setSearchHistory(JSON.parse(storedHistory));
-        if (storedCount) setTotalGeneratedCount(parseInt(storedCount));
-    } catch (e) {
-        console.error("Falha ao carregar storage", e);
+    const loader = document.getElementById('app-loader');
+    if (loader) {
+      setTimeout(() => {
+        loader.style.opacity = '0';
+        setTimeout(() => loader.remove(), 500);
+      }, 100);
     }
   }, []);
 
+  // --- CARREGAMENTO SEGURO DE DADOS ---
   useEffect(() => {
-    localStorage.setItem('leadinfinit_saved', JSON.stringify(savedLeads));
-  }, [savedLeads]);
+    const safeLoad = (key: string, setter: Function, defaultValue: any) => {
+        try {
+            const item = localStorage.getItem(key);
+            if (item) {
+                const parsed = JSON.parse(item);
+                if (typeof defaultValue === 'object' && !Array.isArray(defaultValue)) {
+                    setter((prev: any) => ({ ...prev, ...parsed }));
+                } else {
+                    setter(parsed);
+                }
+            }
+        } catch (e) {
+            console.warn(`Erro ao carregar ${key}, usando padrão.`);
+        }
+    };
 
-  useEffect(() => {
-    localStorage.setItem('leadinfinit_context', JSON.stringify(serviceContext));
-  }, [serviceContext]);
+    safeLoad('leadinfinit_saved', setSavedLeads, []);
+    safeLoad('leadinfinit_context', setServiceContext, { templates: [] });
+    safeLoad('leadinfinit_history', setSearchHistory, []);
+    safeLoad('leadinfinit_total_count', setTotalGeneratedCount, 0);
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('leadinfinit_history', JSON.stringify(searchHistory));
-  }, [searchHistory]);
-
-  useEffect(() => {
-    localStorage.setItem('leadinfinit_total_count', totalGeneratedCount.toString());
-  }, [totalGeneratedCount]);
+  // --- SALVAMENTO SEGURO ---
+  useEffect(() => { localStorage.setItem('leadinfinit_saved', JSON.stringify(savedLeads)); }, [savedLeads]);
+  useEffect(() => { localStorage.setItem('leadinfinit_context', JSON.stringify(serviceContext)); }, [serviceContext]);
+  useEffect(() => { localStorage.setItem('leadinfinit_history', JSON.stringify(searchHistory)); }, [searchHistory]);
+  useEffect(() => { localStorage.setItem('leadinfinit_total_count', totalGeneratedCount.toString()); }, [totalGeneratedCount]);
 
 
   const startProgressSimulation = (estimatedSeconds: number) => {
     setProgress(0);
     const totalMs = estimatedSeconds * 1000;
-    const intervalTime = 200; // Update slightly slower for smoother long loads
+    const intervalTime = 100; 
     const steps = totalMs / intervalTime;
-    const increment = 95 / steps; // Vai até 95% e espera
+    const increment = 95 / steps; 
 
     if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
 
     progressIntervalRef.current = window.setInterval(() => {
       setProgress((prev) => {
-        if (prev >= 95) return 95; // Trava em 95% até terminar de verdade
+        if (prev >= 95) return 95; 
         return prev + increment;
       });
     }, intervalTime);
@@ -99,15 +164,20 @@ const App: React.FC = () => {
     setError(null);
     
     if (!append) {
-        const newHistoryItem: SearchHistoryItem = { niche, location, size, timestamp: Date.now() };
+        const newHistoryItem: SearchHistoryItem = { 
+            niche, 
+            location, 
+            size, 
+            source: filters?.searchSource || 'google_maps',
+            timestamp: Date.now() 
+        };
         setSearchHistory(prev => {
             const filtered = prev.filter(item => !(item.niche === niche && item.location === location && item.size === size));
             return [newHistoryItem, ...filtered].slice(0, 10);
         });
     }
 
-    // Estimativa visual melhorada: A API agora faz loop para garantir qualidade, então aumentamos a estimativa
-    const estimatedSeconds = Math.ceil((count * 3.5) + 5); 
+    const estimatedSeconds = Math.ceil((count * 1.5) + 3); 
     startProgressSimulation(estimatedSeconds);
 
     if (!append) {
@@ -119,10 +189,8 @@ const App: React.FC = () => {
     try {
       const existingNames = append ? leads.map(l => l.name) : [];
       
-      // Chamada à API
       const { leads: newLeads, sources: newSources } = await generateLeads(niche, location, size, count, existingNames, serviceContext, filters, customInstruction);
       
-      // Assim que a API responde, finalizamos a barra imediatamente
       stopProgressSimulation();
 
       if (newLeads.length === 0 && !append) {
@@ -133,14 +201,13 @@ const App: React.FC = () => {
         setTotalGeneratedCount(prev => prev + newLeads.length);
         
         if (!append && resultsRef.current) {
-          // Scroll imediato
-          resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
         }
       }
 
     } catch (err: any) {
       console.error(err);
-      setError("Falha ao buscar leads. A internet é vasta, mas às vezes difícil de navegar. Tente novamente.");
+      setError("Falha na conexão com a IA. Verifique sua chave de API ou tente novamente.");
       stopProgressSimulation();
     } finally {
       setIsSearching(false);
@@ -159,13 +226,22 @@ const App: React.FC = () => {
       if (exists) {
         return prev.filter(l => l.id !== lead.id);
       } else {
-        const leadToSave = { 
-            ...lead, 
-            status: lead.status || 'new',
-            score: lead.score || 'warm'
-        };
-        return [...prev, leadToSave];
+        return [...prev, { ...lead, status: lead.status || 'new', score: lead.score || 'warm' }];
       }
+    });
+  };
+
+  const handleSaveAll = () => {
+    setSavedLeads(prev => {
+        const newSaved = [...prev];
+        let addedCount = 0;
+        leads.forEach(lead => {
+            if (!newSaved.find(l => l.id === lead.id)) {
+                newSaved.push({ ...lead, status: lead.status || 'new', score: lead.score || 'warm' });
+                addedCount++;
+            }
+        });
+        return newSaved;
     });
   };
   
@@ -202,111 +278,64 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background text-white selection:bg-accent/30 selection:text-white pb-20">
+    <div className="min-h-screen bg-background text-white selection:bg-accent/30 selection:text-white pb-20 overflow-x-hidden w-full">
       
-      {/* Background Gradients */}
+      {/* Background Effects */}
       <div className="fixed inset-0 z-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px] opacity-30 animate-pulse-fast"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/20 rounded-full blur-[120px] opacity-20"></div>
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/20 rounded-full blur-[120px] opacity-20 animate-pulse-fast"></div>
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/20 rounded-full blur-[120px] opacity-15"></div>
       </div>
 
-      <div className="relative z-10 container mx-auto px-4 pt-8 md:pt-16">
+      <div className="relative z-10 container mx-auto px-4 pt-6 md:pt-8 max-w-[1400px]">
         
-        {/* Header */}
-        <div className="text-center mb-10 space-y-4">
-          <h1 className="text-5xl md:text-7xl font-black tracking-tighter mb-4">
+        {/* HEADER RESPONSIVO */}
+        <div className="text-center mb-6 space-y-1">
+          {/* Ajustado para text-2xl em mobile para não quebrar linha */}
+          <h1 className="text-2xl md:text-5xl font-black tracking-tighter mb-1">
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-200 to-slate-400">Lead</span>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Infinit</span>
           </h1>
-          <p className="text-slate-400 text-lg md:text-xl max-w-2xl mx-auto font-light">
-            Sua máquina de prospecção. Encontre leads ideais para <span className="text-accent font-medium">oferta de sites</span> e marketing.
+          <p className="text-slate-400 text-xs md:text-sm max-w-xl mx-auto font-light leading-relaxed hidden sm:block">
+            Sua máquina de prospecção.
           </p>
         </div>
 
-        {/* Tab Navigation - BLOCKED WHEN SEARCHING */}
-        <div className={`flex flex-wrap justify-center mb-10 gap-2 transition-all duration-300 ${isSearching ? 'pointer-events-none opacity-50 grayscale' : ''}`}>
-          <div className="bg-surface/50 p-1 rounded-xl border border-slate-800 flex flex-wrap gap-2 backdrop-blur-sm">
-             <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'dashboard' 
-                  ? 'bg-slate-700 text-white shadow-lg shadow-slate-900/25 border border-slate-600' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <HomeIcon className="w-4 h-4 mr-2" />
-              Visão Geral
-            </button>
-            <button
-              id="tab-search-trigger" // ID for internal linking
-              onClick={() => setActiveTab('search')}
-              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'search' 
-                  ? 'bg-primary text-white shadow-lg shadow-primary/25' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <SearchIcon className="w-4 h-4 mr-2" />
-              Buscador
-            </button>
-            <button
-              onClick={() => setActiveTab('saved')}
-              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'saved' 
-                  ? 'bg-green-600 text-white shadow-lg shadow-green-600/25' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <WhatsAppIcon className="w-4 h-4 mr-2" />
-              CRM Pipeline
-              {savedLeads.length > 0 && (
-                <span className="ml-2 bg-white/20 px-2 py-0.5 rounded-full text-xs">
-                  {savedLeads.length}
-                </span>
-              )}
-            </button>
-             <button
-              onClick={() => setActiveTab('lab')}
-              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'lab' 
-                  ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <BrainIcon className="w-4 h-4 mr-2" />
-              Laboratório
-            </button>
-            <button
-              onClick={() => setActiveTab('config')}
-              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'config' 
-                  ? 'bg-accent text-surface shadow-lg shadow-accent/25' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <SettingsIcon className="w-4 h-4 mr-2" />
-              Meu Serviço
-              {!serviceContext.serviceName && (
-                <span className="ml-2 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('tutorial')}
-              className={`flex items-center px-4 md:px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-                activeTab === 'tutorial' 
-                  ? 'bg-yellow-600 text-white shadow-lg shadow-yellow-600/25' 
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              <BookOpenIcon className="w-4 h-4 mr-2" />
-              Guia
-            </button>
+        {/* NAVEGAÇÃO SCROLLÁVEL - A solução mágica para telas pequenas */}
+        <div className={`mb-6 transition-all duration-300 ${isSearching ? 'pointer-events-none opacity-50 grayscale' : ''}`}>
+          <div className="flex justify-start md:justify-center overflow-x-auto pb-2 scrollbar-hide px-2 -mx-4 md:mx-0">
+            <div className="bg-surface/50 p-1.5 rounded-xl border border-slate-800 flex flex-nowrap gap-1.5 backdrop-blur-sm min-w-max mx-2 md:mx-0">
+              {[
+                { id: 'dashboard', icon: HomeIcon, label: 'Visão Geral' },
+                { id: 'search', icon: SearchIcon, label: 'Buscador', highlight: true },
+                { id: 'saved', icon: WhatsAppIcon, label: 'CRM', count: savedLeads.length },
+                { id: 'lab', icon: BrainIcon, label: 'Lab' },
+                { id: 'config', icon: SettingsIcon, label: 'Serviço' },
+                { id: 'tutorial', icon: BookOpenIcon, label: 'Guia' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  id={tab.id === 'search' ? 'tab-search-trigger' : undefined}
+                  onClick={() => setActiveTab(tab.id as Tab)}
+                  className={`flex items-center px-3 py-2 md:px-4 md:py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                    activeTab === tab.id 
+                      ? `${tab.highlight ? 'bg-primary' : tab.id === 'saved' ? 'bg-green-600' : tab.id === 'lab' ? 'bg-purple-600' : tab.id === 'config' ? 'bg-accent text-surface' : 'bg-slate-700'} text-white shadow-lg transform scale-105` 
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                  }`}
+                >
+                  <tab.icon className="w-3.5 h-3.5 mr-1.5" />
+                  {tab.label}
+                  {tab.count !== undefined && tab.count > 0 && (
+                    <span className="ml-1.5 bg-white/20 px-1.5 py-0.5 rounded-full text-[9px]">
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
-        {/* Main Content Area */}
         <div className="min-h-[500px]">
-          
           {activeTab === 'dashboard' && (
              <Dashboard 
                 savedLeads={savedLeads} 
@@ -318,7 +347,6 @@ const App: React.FC = () => {
 
           {activeTab === 'search' && (
             <>
-              {/* Search */}
               <SearchInterface 
                 onSearch={(n, l, s, c, f, i) => handleSearch(n, l, s, c, f, i, false)} 
                 isLoading={isSearching} 
@@ -328,92 +356,45 @@ const App: React.FC = () => {
                 serviceContext={serviceContext}
               />
 
-              {/* Error State */}
               {error && (
-                <div className="max-w-4xl mx-auto mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-200 text-center animate-fade-in">
-                  <p className="font-bold">⚠️ Atenção</p>
+                <div className="max-w-4xl mx-auto mb-8 p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-200 text-center animate-fade-in text-sm">
+                  <p className="font-bold">⚠️ Status da Missão</p>
                   {error}
                 </div>
               )}
 
-              {/* Results */}
               {leads.length > 0 && (
-                <div ref={resultsRef} className="max-w-7xl mx-auto animate-fade-in">
-                  <div className="flex justify-between items-center mb-8">
+                <div ref={resultsRef} className="animate-fade-in">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 px-2 gap-3">
                     <div>
-                      <h2 className="text-3xl font-bold text-white">
-                        Resultados Encontrados
-                      </h2>
-                      <p className="text-slate-500 mt-1">
-                        {leads.length} leads qualificados com <span className="text-green-400 font-bold">Telefone</span>
-                      </p>
+                      <h2 className="text-xl md:text-2xl font-bold text-white">Resultados</h2>
+                      <p className="text-slate-500 text-xs mt-0.5">{leads.length} alvos identificados.</p>
                     </div>
-                    <button 
-                      onClick={exportCSV}
-                      disabled={isSearching}
-                      className={`flex items-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors border border-slate-700 ${isSearching ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      <DownloadIcon className="w-4 h-4" />
-                      <span>Exportar CSV</span>
-                    </button>
+                    <div className="flex gap-2 w-full md:w-auto">
+                        <button onClick={handleSaveAll} disabled={isSearching} className="flex-1 md:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-accent hover:bg-cyan-400 text-surface font-bold rounded-lg transition-all shadow-lg shadow-cyan-500/20 text-xs uppercase tracking-wide transform active:scale-95">
+                          <SaveIcon className="w-4 h-4" /> <span>Salvar Todos ({leads.length})</span>
+                        </button>
+                        <button onClick={exportCSV} disabled={isSearching} className="flex-1 md:flex-none flex items-center justify-center space-x-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors border border-slate-700 text-xs font-bold uppercase tracking-wide">
+                          <DownloadIcon className="w-4 h-4" /> <span className="hidden md:inline">Exportar CSV</span><span className="md:hidden">CSV</span>
+                        </button>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+                  {/* GRID RESPONSIVO: 1 col (mobile), 2 col (laptop), 3 col (desktop) */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-12">
                     {leads.map((lead, index) => (
-                      <LeadCard 
-                        key={lead.id} 
-                        lead={lead} 
-                        index={index} 
-                        onSave={toggleSaveLead}
-                        isSaved={savedLeads.some(l => l.id === lead.id)}
-                      />
+                      <LeadCard key={lead.id} lead={lead} index={index} onSave={toggleSaveLead} isSaved={savedLeads.some(l => l.id === lead.id)} />
                     ))}
                   </div>
 
-                  {/* Load More */}
                   <div className="flex justify-center pb-12">
-                     <button
-                       onClick={handleLoadMore}
-                       disabled={isSearching}
-                       className="group relative px-8 py-3 rounded-full bg-surface border border-slate-700 hover:border-accent transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed overflow-hidden"
-                     >
-                       {isSearching && (
-                          <div 
-                            className="absolute bottom-0 left-0 h-1 bg-accent z-10 transition-all duration-300 ease-out"
-                            style={{ width: `${progress}%` }}
-                          ></div>
-                       )}
-                       <div className="absolute inset-0 bg-accent/20 blur-lg rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                       <span className="relative z-10 font-semibold text-slate-300 group-hover:text-white flex items-center">
-                         {isSearching ? `Minerando Mais Dados (${Math.round(progress)}%)...` : 'Gerar Leads Infinitos'}
-                         {!isSearching && (
-                           <svg className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                           </svg>
-                         )}
+                     <button onClick={handleLoadMore} disabled={isSearching} className="group relative px-6 py-2.5 rounded-full bg-surface border border-slate-700 hover:border-accent transition-all duration-300 disabled:opacity-50 overflow-hidden text-sm w-full md:w-auto">
+                       {isSearching && <div className="absolute bottom-0 left-0 h-1 bg-accent z-10 transition-all duration-300 ease-out" style={{ width: `${progress}%` }}></div>}
+                       <span className="relative z-10 font-semibold text-slate-300 group-hover:text-white flex items-center justify-center">
+                         {isSearching ? `Minerando (${Math.round(progress)}%)...` : 'Buscar Mais Leads'}
                        </span>
                      </button>
                   </div>
-
-                  {/* Sources (Grounding) */}
-                  {sources.length > 0 && (
-                    <div className="mt-8 pt-8 border-t border-slate-800/50">
-                       <h4 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Fontes Analisadas</h4>
-                       <div className="flex flex-wrap gap-2">
-                         {sources.slice(0, 10).map((source, idx) => (
-                           <a 
-                            key={idx} 
-                            href={source.uri} 
-                            target="_blank" 
-                            rel="noreferrer"
-                            className="text-xs text-slate-600 hover:text-accent underline transition-colors"
-                          >
-                            {new URL(source.uri).hostname.replace('www.', '')}
-                          </a>
-                         ))}
-                       </div>
-                    </div>
-                  )}
                 </div>
               )}
             </>
@@ -429,23 +410,20 @@ const App: React.FC = () => {
             />
           )}
 
-          {activeTab === 'lab' && (
-            <SalesLab serviceContext={serviceContext} />
-          )}
-
-          {activeTab === 'config' && (
-            <ServiceConfig 
-              initialContext={serviceContext}
-              onSave={setServiceContext}
-            />
-          )}
-
-          {activeTab === 'tutorial' && (
-            <Tutorial onNavigate={(tab: Tab) => setActiveTab(tab)} />
-          )}
+          {activeTab === 'lab' && <SalesLab serviceContext={serviceContext} />}
+          {activeTab === 'config' && <ServiceConfig initialContext={serviceContext} onSave={setServiceContext} />}
+          {activeTab === 'tutorial' && <Tutorial onNavigate={(tab: Tab) => setActiveTab(tab)} />}
         </div>
       </div>
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 };
 

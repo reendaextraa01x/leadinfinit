@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { Lead, ServiceContext, LeadStatus, ObjectionType, ChatAnalysis } from '../types';
-import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon, MicroscopeIcon, XIcon, LightBulbIcon, SearchIcon } from './ui/Icons';
-import { generateMarketingCopy, generateLeadAudit, handleObjection, calculateInactionCost, analyzeChatHistory, generateMarketingCopyBatch } from '../services/geminiService';
+import { WhatsAppIcon, TrashIcon, MagicIcon, CheckIcon, ColumnsIcon, FireIcon, DocumentReportIcon, ArrowRightIcon, ShieldIcon, CalculatorIcon, MicroscopeIcon, XIcon, LightBulbIcon, SearchIcon, TemplateIcon } from './ui/Icons';
+import { generateLeadAudit, handleObjection, calculateInactionCost, analyzeChatHistory, generateMarketingCopyBatch } from '../services/geminiService';
 
 interface BatchSenderProps {
   savedLeads: Lead[];
@@ -21,7 +21,7 @@ const cleanPhone = (phone: string): string | null => {
   return cleaned;
 };
 
-// Helper para dividir array em chunks (Movido para fora e reescrito para evitar erro de tipo do TS)
+// Helper para dividir array em chunks
 const chunkArray = <T,>(arr: T[], size: number): T[][] => {
   const chunks: T[][] = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -116,10 +116,10 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
   const handleGenerateAllMessages = async () => {
     setIsBulkGenerating(true);
     // Only generate for 'new' leads to save tokens/time
-    const leadsToProcess = savedLeads.filter(l => l.status === 'new' && cleanPhone(l.phone));
+    const leadsToProcess: Lead[] = savedLeads.filter(l => l.status === 'new' && cleanPhone(l.phone));
 
     // Dividir em lotes de 5 para o Batch API
-    const batches = chunkArray(leadsToProcess, 5);
+    const batches = chunkArray<Lead>(leadsToProcess, 5);
 
     // Set loading states
     setLeadStates(prev => {
@@ -170,11 +170,11 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
   const handleGenerateAllAudits = async () => {
       setIsBulkAuditing(true);
       // Filtra leads novos que AINDA NÃO têm auditoria
-      const leadsToProcess = savedLeads.filter(l => l.status === 'new' && !l.audit);
+      const leadsToProcess: Lead[] = savedLeads.filter(l => l.status === 'new' && !l.audit);
 
       // Audits ainda fazemos sequencial/paralelo limitado, pois requer análise profunda individual
       // Mas podemos acelerar fazendo Promise.all em pequenos grupos
-      const batches = chunkArray(leadsToProcess, 3);
+      const batches = chunkArray<Lead>(leadsToProcess, 3);
 
       for (const batch of batches) {
           // Set loading
@@ -283,6 +283,18 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
 
   const moveStage = (lead: Lead, nextStage: LeadStatus) => {
       onUpdateLead({ ...lead, status: nextStage });
+  };
+
+  // APPLY TEMPLATE LOGIC
+  const applyTemplate = (lead: Lead, templateId: string) => {
+      const template = (serviceContext.templates || []).find(t => t.id === templateId);
+      if(!template) return;
+
+      // Replace variables
+      let content = template.content;
+      content = content.replace(/{nome}/g, lead.name);
+      
+      setLeadStates(prev => ({...prev, [lead.id]: { ...prev[lead.id], message: content }}));
   };
 
   // Group leads by status
@@ -530,6 +542,25 @@ const BatchSender: React.FC<BatchSenderProps> = ({ savedLeads, serviceContext, o
                                             )}
                                         </div>
                                     )}
+                                    
+                                    {/* TEMPLATE SELECTOR (NEW) */}
+                                    <div className="mb-1">
+                                         <select 
+                                            onChange={(e) => {
+                                                if(e.target.value) applyTemplate(lead, e.target.value);
+                                                e.target.value = ''; // Reset selection
+                                            }}
+                                            className="w-full bg-transparent text-[10px] text-slate-500 hover:text-green-400 border border-transparent hover:border-slate-700 rounded p-1 cursor-pointer outline-none transition-colors"
+                                         >
+                                            <option value="" className="bg-slate-900 text-slate-400">📂 Carregar Script Salvo...</option>
+                                            {(serviceContext.templates || []).map(t => (
+                                                <option key={t.id} value={t.id} className="bg-slate-900 text-white">{t.title}</option>
+                                            ))}
+                                            {(serviceContext.templates || []).length === 0 && (
+                                                <option disabled className="bg-slate-900 text-slate-600">Nenhum script criado (Vá em Meu Serviço)</option>
+                                            )}
+                                         </select>
+                                    </div>
 
                                     {/* Message Area */}
                                     <textarea 

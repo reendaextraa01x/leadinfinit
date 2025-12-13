@@ -1,3 +1,5 @@
+
+
 declare var process: any;
 
 export type LeadStatus = 'new' | 'contacted' | 'negotiation' | 'closed';
@@ -21,11 +23,13 @@ export interface Lead {
 
 export type BusinessSize = 'small' | 'medium' | 'large';
 export type LeadQualityFilter = 'opportunity' | 'high-ticket' | 'urgent';
+export type SearchSource = 'google_maps' | 'instagram_hunter'; // NOVA FONTE
 
 export interface SearchFilters {
   websiteRule: 'any' | 'must_have' | 'must_not_have';
   mustHaveInstagram: boolean;
   mobileOnly: boolean;
+  searchSource: SearchSource; // Adicionado aos filtros
 }
 
 export interface SearchState {
@@ -46,18 +50,26 @@ export interface ServiceInsights {
   potential: string;
 }
 
+export interface MessageTemplate {
+  id: string;
+  title: string;
+  content: string;
+}
+
 export interface ServiceContext {
   serviceName: string;
   description: string;
   targetAudience: string;
   ticketValue?: number;
   insights?: ServiceInsights; // AI Strategic Advice
+  templates?: MessageTemplate[]; // Saved Scripts
 }
 
 export interface SearchHistoryItem {
   niche: string;
   location: string;
   size: BusinessSize;
+  source: SearchSource; // Adicionado ao histórico
   timestamp: number;
 }
 

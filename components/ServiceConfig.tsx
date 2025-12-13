@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
-import { ServiceContext, ServiceInsights } from '../types';
-import { SettingsIcon, SaveIcon, MoneyIcon, MagicIcon, ChartIcon, TargetIcon, LightningIcon, TrashIcon } from './ui/Icons';
+import { ServiceContext, ServiceInsights, MessageTemplate } from '../types';
+import { SettingsIcon, SaveIcon, MoneyIcon, MagicIcon, ChartIcon, TargetIcon, LightningIcon, TrashIcon, TemplateIcon, DownloadIcon } from './ui/Icons';
 import { generateServiceInsights, generateKillerDifferential } from '../services/geminiService';
 
 interface ServiceConfigProps {
@@ -14,6 +14,10 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
   const [isSaved, setIsSaved] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGeneratingOffer, setIsGeneratingOffer] = useState(false);
+  
+  // Template States
+  const [newTemplateTitle, setNewTemplateTitle] = useState('');
+  const [newTemplateContent, setNewTemplateContent] = useState('');
 
   // Função principal para salvar e gerar/regenerar estratégia
   const handleSaveAndGenerate = async (e?: React.FormEvent) => {
@@ -87,11 +91,79 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
               description: '',
               targetAudience: '',
               ticketValue: 1500,
-              insights: undefined
+              insights: undefined,
+              templates: []
           };
           setContext(emptyContext);
           onSave(emptyContext);
       }
+  };
+
+  // BACKUP FUNCTIONS
+  const handleExportData = () => {
+      const data = {
+          savedLeads: localStorage.getItem('leadinfinit_saved'),
+          context: localStorage.getItem('leadinfinit_context'),
+          history: localStorage.getItem('leadinfinit_history')
+      };
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `backup_leadinfinit_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+  };
+
+  const handleImportData = (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          try {
+              const content = e.target?.result as string;
+              const data = JSON.parse(content);
+              
+              if (data.savedLeads) localStorage.setItem('leadinfinit_saved', data.savedLeads);
+              if (data.context) localStorage.setItem('leadinfinit_context', data.context);
+              if (data.history) localStorage.setItem('leadinfinit_history', data.history);
+
+              alert("Dados importados com sucesso! A página será recarregada.");
+              window.location.reload();
+          } catch (err) {
+              alert("Erro ao ler arquivo de backup.");
+          }
+      };
+      reader.readAsText(file);
+  };
+
+  // TEMPLATE MANAGEMENT
+  const addTemplate = () => {
+      if(!newTemplateTitle || !newTemplateContent) return;
+      const newTemplate: MessageTemplate = {
+          id: Date.now().toString(),
+          title: newTemplateTitle,
+          content: newTemplateContent
+      };
+      const updatedContext = { 
+          ...context, 
+          templates: [...(context.templates || []), newTemplate] 
+      };
+      setContext(updatedContext);
+      onSave(updatedContext);
+      setNewTemplateTitle('');
+      setNewTemplateContent('');
+  };
+
+  const deleteTemplate = (id: string) => {
+      const updatedContext = {
+          ...context,
+          templates: (context.templates || []).filter(t => t.id !== id)
+      };
+      setContext(updatedContext);
+      onSave(updatedContext);
   };
 
   return (
@@ -112,14 +184,37 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
                 </p>
               </div>
           </div>
-          <button 
-            onClick={handleClear}
-            className="flex items-center gap-1 text-xs font-bold text-red-400 hover:text-red-300 bg-red-900/10 hover:bg-red-900/20 px-3 py-2 rounded border border-red-900/30 transition-colors"
-            title="Limpar todos os campos"
-          >
-              <TrashIcon className="w-4 h-4" />
-              Limpar Tudo
-          </button>
+        </div>
+        
+        {/* BACKUP SECTION */}
+        <div className="mb-6 p-4 bg-slate-900/50 border border-slate-700 rounded-lg flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h4 className="text-white font-bold text-sm">Backup de Dados (Migração)</h4>
+                <p className="text-xs text-slate-400">Use isso para transferir seus leads de um computador para outro.</p>
+            </div>
+            <div className="flex gap-2">
+                <button 
+                    onClick={handleExportData}
+                    className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-2 rounded font-bold"
+                >
+                    <DownloadIcon className="w-4 h-4" /> Baixar Backup
+                </button>
+                <label className="flex items-center gap-1 bg-slate-700 hover:bg-slate-600 text-white text-xs px-3 py-2 rounded font-bold cursor-pointer">
+                    <input type="file" accept=".json" onChange={handleImportData} className="hidden" />
+                    📂 Carregar Backup
+                </label>
+            </div>
+        </div>
+
+        <div className="flex justify-end mb-4">
+             <button 
+                onClick={handleClear}
+                className="flex items-center gap-1 text-xs font-bold text-red-400 hover:text-red-300 bg-red-900/10 hover:bg-red-900/20 px-3 py-2 rounded border border-red-900/30 transition-colors"
+                title="Limpar todos os campos"
+            >
+                <TrashIcon className="w-4 h-4" />
+                Limpar Tudo
+            </button>
         </div>
 
         <form onSubmit={handleSaveAndGenerate} className="space-y-6 relative z-10">
@@ -237,6 +332,66 @@ const ServiceConfig: React.FC<ServiceConfigProps> = ({ initialContext, onSave })
           </div>
 
         </form>
+
+        {/* MESSAGES TEMPLATES MANAGER (NEW) */}
+        <div className="mt-8 border-t border-slate-800 pt-8 animate-fade-in">
+             <div className="flex items-center mb-6">
+                <TemplateIcon className="w-6 h-6 text-green-400 mr-2" />
+                <div>
+                     <h3 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-400">
+                        Meus Scripts de Venda
+                    </h3>
+                    <p className="text-slate-400 text-xs mt-1">
+                        Crie modelos de mensagem para não precisar escrever tudo do zero. Use <strong>{'{nome}'}</strong> para substituir pelo nome do cliente automaticamente.
+                    </p>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Add New */}
+                <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800">
+                    <p className="text-xs font-bold text-slate-500 uppercase mb-3">Novo Modelo</p>
+                    <input 
+                        type="text" 
+                        value={newTemplateTitle}
+                        onChange={(e) => setNewTemplateTitle(e.target.value)}
+                        placeholder="Título (ex: Abordagem Direta)"
+                        className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-white mb-2 focus:border-green-500 outline-none"
+                    />
+                    <textarea 
+                         value={newTemplateContent}
+                         onChange={(e) => setNewTemplateContent(e.target.value)}
+                         placeholder="Olá {nome}, vi que sua empresa..."
+                         className="w-full h-24 bg-slate-950 border border-slate-800 rounded p-2 text-xs text-slate-300 mb-2 focus:border-green-500 outline-none resize-none"
+                    />
+                    <button 
+                        onClick={addTemplate}
+                        disabled={!newTemplateTitle || !newTemplateContent}
+                        className="w-full py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded text-xs disabled:opacity-50"
+                    >
+                        + Adicionar Modelo
+                    </button>
+                </div>
+
+                {/* List Existing */}
+                <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                    {(context.templates || []).length === 0 && (
+                        <div className="text-center py-10 text-slate-600 text-xs italic border border-dashed border-slate-800 rounded-lg">
+                            Nenhum script salvo.
+                        </div>
+                    )}
+                    {(context.templates || []).map(template => (
+                        <div key={template.id} className="bg-surface border border-slate-700 p-3 rounded-lg group hover:border-green-500/50 transition-colors">
+                            <div className="flex justify-between items-center mb-2">
+                                <span className="text-sm font-bold text-white">{template.title}</span>
+                                <button onClick={() => deleteTemplate(template.id)} className="text-slate-600 hover:text-red-400"><TrashIcon className="w-4 h-4" /></button>
+                            </div>
+                            <p className="text-xs text-slate-400 line-clamp-2 italic">"{template.content}"</p>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
 
         {/* AI STRATEGY INSIGHTS */}
         {context.insights && (
